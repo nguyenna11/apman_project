@@ -1,0 +1,133 @@
+% ======================================================================
+\section{Testing and benchmarking}
+
+% ======================================================================
+\subsection{Testing}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{One infamous bug story}
+
+  The binary search function of the Java standard library used to compute
+  the median index (\lstinline{low<=high}) like:
+  \begin{lstlisting}
+    int mid = (low+high) / 2;
+  \end{lstlisting}
+
+  Bug went unsuspected for 15+ years.
+  --- {\em What bug? That's the exact maths!}
+  \begin{itemize}
+  \item Sure. But \lstinline{(low+high)} will overflow as soon as \lstinline{low+high > (1<<31)-1}.
+  \item \lstinline{mid} index then gets corrupted. Search fails. Critical software at risk. Worldwide.
+  \item Patch with exact same maths, without overflowing:
+    \begin{lstlisting}
+      int mid = low + (high-low) / 2;
+    \end{lstlisting}
+  \end{itemize}
+
+  Despite correct maths, bug appeared when machines got enough memory to trigger it.
+
+  \begin{itemize}
+  \item Trigger as much edge cases as possible during testing.
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Testing rationale}
+
+  Basic test typology
+  \begin{itemize}
+  \item Unit testing: Interface behavior
+  \item Functional testing: Basic algorithm behavior
+  \item Random testing: Functional testing on long streaks of random data
+  \end{itemize}
+
+  Functional testing with a {\em digital twin}
+  \begin{itemize}
+  \item Use simplest, yet likely slower, equivalent code for validation.
+  \item Searching an array is simplest: can be provably correct, but runs in $O(N)$.
+  \item Searching a Robing-Hood hashtable is more tedious
+    \begin{itemize}
+    \item Test results on the table are compared to those on the simplest code for arrays.
+    \end{itemize}
+  \end{itemize}
+  
+  Most reasonable way to trigger unsuspected edge cases: run code on random data
+  \begin{itemize}
+  \item Control RNG seed for test debugging, then use random seeds for real tests.
+  \item Also known as {\em fuzz testing}.
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{How we'll do the testing}
+
+  \begin{enumerate}
+  \item Have unit and functional tests in \lstinline{test/1-map.c}
+
+    Test template is in \lstinline{test/map-test.h} .
+
+  \item Since our digital twin would be logarithmic search at best, use integers instead.
+
+    Cheapest (constant-time), exact local ground truth.
+
+  \item Also use (possibly random) integers in the benchmark.
+
+    That's our fuzzing-like strategy, report failed lookups.
+  \end{enumerate}
+
+  Your basic workflow:
+  \begin{enumerate}
+  \item Implement map option \lstinline{ds_backend_foo}
+  \item Check at least you did not break the basics:
+
+    \lstinline{apman$ make deep-clean && make test/1-map@check}
+
+  \item Track the existence of more subtle bugs with the benchmark on random integers
+
+  \item Verify robustness with ascending/descending integer sequences
+  \end{enumerate}
+  
+\end{frame}
+
+
+% ======================================================================
+\subsection{Benchmarking}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Benchmarking maps}
+
+  \begin{itemize}
+  \item Map benchmarking metrics (minimal set), per mapping:
+    \begin{itemize}
+    \item Memory overhead compared to using a flat array for key/value storage, in bytes
+    \item Time to insert-absent/lookup-present/lookup-absent/remove-present, in nsecs
+    \end{itemize}
+  \item {\em How many nanoseconds to find a specific needle in a mega-haystack?}
+    \begin{itemize}
+    \item Micro-benchmarking unreliable, aggregate stats on multiple runs
+    \item Design benchmark template accordingly and report lookup errors:
+      \begin{enumerate}
+      \item Insert $N$ different integers in empty map
+      \item Lookup those $N$ integers (known to be in the map)
+      \item Lookup $N$ other integers (known {\em not} to be in the map)
+      \item Remove the $N$ integers
+      \end{enumerate}
+    \item Save raw run stats in CSV format
+    \end{itemize}
+  \item Benchmark rendering: timing plots + radar plot with Inter-Quartile Range
+    \begin{itemize}
+    \item Map implementations feature a variety of behaviors.
+    \end{itemize}
+  \item Have a Python script to run benchmark configs and make the plots
+    \begin{itemize}
+    \item Forget \lstinline{matlab}, welcome to  \lstinline{maplab}!
+    \end{itemize}
+  \end{itemize}
+
+\end{frame}
+
+

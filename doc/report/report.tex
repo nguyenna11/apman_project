@@ -1,0 +1,87 @@
+\documentclass[a4paper,notitlepage]{report}
+
+\newcommand{\authorOne}   {Tom    \textsc{Hatte}}
+\newcommand{\authorTwo}   {Basile \textsc{Hycke}}
+\newcommand{\authorThree} {Maud   \textsc{Zarella}}
+
+\input{preamble.tex}
+
+%======================== DEBUT DU DOCUMENT ========================
+
+\begin{document}
+
+\author{\authorOne, \authorTwo, \authorThree}
+\title{Phelma {SEOC} 2A {APMAN} Report}
+
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+  \maketitle
+
+  \begin{abstract}
+
+    Your names must appear in alphabetical order.
+
+    You must create a Git repository on \href{https://gitlab.ensimag.fr}{\texttt{gitlab.ensimag.fr}}. Use any of your accounts.
+
+    The name of your repository must include your logins in alphabetical order:
+
+    \hspace{3cm}\texttt{apman\_login1\_login2\_login3}
+
+    Make sure you made your teachers members of your repository. 
+
+    You may write your report in French (see line 6 in \texttt{report/preamble.tex}) or in English.
+
+    This abstract should list what you did, how, the state of your code and your broad conclusions.
+  \end{abstract}
+
+\end{titlepage}
+\hypersetup{pageanchor=true}
+
+\tableofcontents
+
+\listoffigures
+\listof{code}{List of Codes}
+
+% ====================== INCLUSION DES PARTIES ======================
+
+\nocite{*}
+
+% \part{Hashed things}
+% \input{myfile.tex}
+
+% \appendix
+
+% \input{appendix.tex}
+
+\chapter*{Introduction}
+
+See the bibliography for a few references that may be of interest.
+
+\chapter{Who did what?}
+
+\section{\authorOne}
+
+\subsection{What I did}
+
+\subsection{What I learned}
+
+
+\section{\authorTwo}
+
+\subsection{What I did}
+
+\subsection{What I learned}
+
+
+\section{\authorThree}
+
+\subsection{What I did}
+
+\subsection{What I learned}
+
+
+
+
+\printbibliography
+
+\end{document}

@@ -1,0 +1,21 @@
+ifndef DS
+
+include module/core.def
+
+DS_COMMON     = $(CORE) src/ds/iterator.o src/ds/combinadics.o
+
+DS            = $(DS_COMMON) src/ds/array.o src/ds/map.o src/ds/deque.o
+
+$(TESTS_DIR)/1-array       : $(DS) $(TESTS_DIR)/1-array.o
+$(TESTS_DIR)/1-deque       : $(DS) $(TESTS_DIR)/1-deque.o
+$(TESTS_DIR)/1-combinadics : $(DS) $(TESTS_DIR)/1-combinadics.o
+$(TESTS_DIR)/1-map         : $(DS) $(TESTS_DIR)/1-map.o
+$(TESTS_DIR)/2-set         : $(DS) $(TESTS_DIR)/2-set.o
+
+TESTS += $(TESTS_DIR)/1-array
+TESTS += $(TESTS_DIR)/1-deque
+TESTS += $(TESTS_DIR)/1-combinadics
+TESTS += $(TESTS_DIR)/1-map
+TESTS += $(TESTS_DIR)/2-set
+
+endif

@@ -1,0 +1,1020 @@
+% ======================================================================
+\section{Basic tools for data structures}
+
+% % ----------------------------------------------------------------------
+% \begin{frame}[fragile]{Rationale: Generic data structures}
+
+%   \begin{itemize}
+%   \item Only aggregate data structure in C: arrays.
+%   \item At least, you also want lists/stacks/queues, sets/maps.
+%   \item (Re-)Implement them for {\em actual reusability}: you want {\em generic} data structures
+%     \begin{itemize}
+%     \item Write source code once, reuse it for any object type in data structure.
+%     \end{itemize}
+%   \item Provide streamlined interfaces, expose options with sound defaults
+%   \end{itemize}
+
+%   Basically, use dedicated programming techniques for each type of container:
+%   \begin{itemize}
+%   \item Generic arrays: by {\em metadata hiding} and {\em generic pointers} (\lstinline{void*})
+%     \begin{itemize}
+%     \item We've secretly covered much of it previously!
+%     \end{itemize}
+%   \item Generic lists: by {\em intrusive data structures}
+%     \begin{itemize}
+%     \item Meet the \lstinline{offsetof} operator in C.
+%     \end{itemize}
+%   \item Generic maps: by {\em code templating} (preprocessor metaprogramming)
+%     \begin{itemize}
+%     \item Meet the \lstinline{##} preprocessor operator.
+%     \end{itemize}
+%   \end{itemize}
+
+% \end{frame}
+
+
+% % ----------------------------------------------------------------------
+% \begin{frame}[fragile]{Rationale: Iterators}
+
+%   \begin{itemize}
+%   \item Some data structures must be properly {\em iterable} (but not stacks or queues!)
+%     \begin{itemize}
+%     \item {\em Iterator objects} for arrays, lists, sets, and maps.
+%     \end{itemize}
+%   \item Use an iterator as the corresponding search procedure return value
+%     \begin{itemize}
+%     \item Not-found encoded as end-of-iteration;
+%     \item Very often, one also wants all objects ``after'' a query object.
+%     \end{itemize}
+%   \item An iterator may be passed to (a series of) functions
+%     \begin{itemize}
+%     \item Generate next element {\em on-demand} (async, lazy iteration), {\em in any function}.
+%     \end{itemize}
+%   \item Add syntactic sugar for common iteration patterns
+%     \begin{itemize}
+%     \item \lstinline{foreach(_,forward(mylist)) ...}
+%     \item \lstinline{foreach(_,forward(myarray)) ...}
+%     \item \lstinline{foreach(_,keys(mymap)) ...}
+%     \end{itemize}
+%   \item If needed, extend to {\em generators} (iterators on combinadics)
+%     \begin{itemize}
+%     \item \lstinline{foreach(_,range(2,0.01,3)) ...}
+%     \item \lstinline{foreach(_,permutation(3,5)) ...}
+%     \item \lstinline{foreach(_,combination(2,4)) ...}
+%     \end{itemize}
+    
+%   \end{itemize}
+  
+% \end{frame}
+
+
+% % ----------------------------------------------------------------------
+% \begin{frame}[fragile]{Rationale: Genericity {\em over} data structures}
+
+%   Look harder at the previous \lstinline{forward()} iterator constructor.
+%   \begin{itemize}
+%   \item It is supposed to be callable and have relevant behavior on lists {\em or} arrays!
+%   \item Add {\em typing info} through {\em pointer tagging};
+%   \item Implement \lstinline{typeof()} macro, dispatch to specialized methods.
+%   \end{itemize}
+
+% \end{frame}
+
+
+% % ----------------------------------------------------------------------
+% \begin{frame}[fragile]{Rest of this chapter: application example to arrays}
+
+%   \begin{itemize}
+%   \item We do the arrays, must work for testing
+%   \item You do the lists, stacks, queues, sets, maps.
+%   \end{itemize}
+
+%   Iterators are mandatory except for stacks and queues.
+
+%   Outline
+%   \begin{enumerate}
+%   \item Pointer tagging explained
+%   \item Iterators
+%   \item Generic arrays
+%   \end{enumerate}
+
+% \end{frame}
+
+
+% ======================================================================
+\subsection{Pointer tagging}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{It's written on your (inter)face!}
+
+  \begin{enumerate}
+  \item We'll have at least arrays and tables as containers (that's $2 \leq 2^3$ different types)
+    \item Fun fact: \lstinline{calloc(3)} will always return addresses on 8-byte boundaries
+    \begin{itemize}
+    \item Even on 32-bit machines, because of \lstinline{double}'s.
+    \end{itemize}
+  \item Fiddle with the 3 lsb's of the data structure address to encode its type number!
+    \begin{itemize}
+    \item If we have any hidden metadata, it should just align on 8-byte.
+    \item Already the case for our allocator pointer: it's 8-byte long! (add padding if 32-bit)
+    \end{itemize}
+  \item Enforce type number of 0 for arrays
+    \begin{itemize}
+    \item So syntax \lstinline{arr[idx]} keeps working, stupid!
+    \item Other type numbers assigned freely in \lstinline{core/tagging.h}:
+      \begin{lstlisting}
+    typedef enum { T_ARRAY, ..., T_ALL } type_t;
+      \end{lstlisting}
+      \lstinline{T_ALL} only here to readily have a symbol for the number of types:
+    \end{itemize}
+  \item Profit!
+  \end{enumerate}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Interface}
+
+  \begin{lstlisting}
+    #include <stdint.h>
+
+    const char *typename(type_t T);
+
+    #define typeof(obj) ((type_t)(((uintptr_t)obj)&0x7))
+    #define TAG(obj,T)  ((void*)(((uintptr_t)obj)|(T&0x7)))
+    
+    #if UINTPTR_MAX == UINT64_MAX
+    #define UNTAG(tagged) \
+      ((void*)(((ptrdiff_t)(tagged))&0xfffffffffffffff8))
+
+    #elif UINTPTR_MAX == UINT32_MAX
+    #define UNTAG(tagged) \
+      ((void*)(((ptrdiff_t)(tagged))&0xfffffff8))
+    #else
+    #error "Unsupported pointer size"
+    #endif
+
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{\lstinline{typename()}}
+
+  \begin{lstlisting}
+    /* Use the 'stringifyer' # preprocessor operator */
+    #define CHECK_TYPE(T) case T: return #T
+
+    const char *typename(type_t T) {
+      switch(T) {
+        CHECK_TYPE(T_ARRAY);
+        CHECK_TYPE(T_TABLE);
+        default: assert(T<T_ALL && "Wrong type_t");
+        return NULL; /* Silence compiler warning */
+      }
+    }
+
+    #undef CHECK_TYPE /* Clean macros namespace */
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Example}
+
+  In \lstinline{src/ds/iterator.c}, we have something like:
+  \begin{lstlisting}
+    iterator_t in(void *tagged) {
+
+      switch(typeof(tagged)) {
+        /* Dispatch to relevant handler, expand list */
+        case T_ARRAY: return array_forward(tagged);
+        /* Other cases as required by the situation! */
+
+        default:    /* Dummy, always-false condition */
+        assert(typeof(tagged)>T_ALL && "Wrong object type" );
+        return NULL;    /* Silence compiler warning! */
+      }
+    }
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Pointer tagging, discussion}
+
+  \begin{itemize}
+  \item If you need more types
+    \begin{itemize}
+    \item Use \lstinline{posix_memalign()} + \lstinline{return memset(ptr,0,size)}
+    \item \lstinline{posix_memalign} has alignment argument (reserve 4, 5, {\em etc.} bits for a \lstinline{type_t})
+    \item Alternative: \lstinline{type_t} stored alongside allocator pointer in hidden metadata
+    \end{itemize}
+  \item If you need dynamic types (then you're doing a virtual machine!)
+    \begin{itemize}
+    \item Use \lstinline{T_ALL-1} for new, generic \lstinline{T_OBJ}
+    \item A \lstinline{T_OBJ} pointer must be followed through to its real type:
+      \begin{lstlisting}
+        typedef struct {
+          type_t T; /* Real type_t */
+          /* Other T_OBJ fields */
+        } object_t;
+      \end{lstlisting}
+
+      We'll adapt this trick to specialize map backends!
+    \item \lstinline{typeof()} becomes a function.
+    \item Possibly add a layer of {\em NaN-boxing} for scalars
+      \begin{itemize}
+      \item Not in this course. Very much not-so-portable fun.
+      \end{itemize}
+    \end{itemize}
+  \end{itemize}
+
+\end{frame}
+
+
+% ======================================================================
+\subsection{Iterators}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Rationale}
+
+  Suppose you iterate the slot addresses of some \lstinline{array} forward:
+  \begin{lstlisting}
+    size_t idx , len = array_length(array);    
+    for ( idx = 0 ; idx < len ; idx++ ) {
+      void *obj = array + idx;
+      /* Do something with obj address */
+    }
+  \end{lstlisting}
+
+  Let's evolve this pattern to make it reusable.
+  
+  \begin{itemize}
+  \item Make \lstinline{idx} and \lstinline{len} local variables of the \lstinline{for} loop:
+    \begin{lstlisting}
+      for ( size_t idx = 0 , len = array_length(array) ;
+            idx < len ; idx++ ) {
+        void *obj = array + idx;
+        /* Do something with obj address */
+      }
+    \end{lstlisting}
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Rationale (cont'd)}
+
+  \begin{itemize}
+  \item Make \lstinline{obj} an outside symbol, update it in test before entering loop body:
+    \begin{lstlisting}
+      void *obj;
+      for ( size_t idx = 0 , len = array_length(array);
+            idx < len && obj = array + idx ; idx++ ) {
+        /* Do something with obj address */
+      }
+    \end{lstlisting}
+    Why it's nice: The loop body is now completely empty. Looping logic is above.
+  \item In effect, we want to cast the above behavior into the most general form:
+    \begin{lstlisting}
+      relevant_itervar_t obj;
+      for ( iterator_t it = structure_iterator(structure) ;
+            next(&it, &obj) ; ) {
+        /* Do something with obj */
+      }
+    \end{lstlisting}
+    If \lstinline{next()} returns strictly positive status, \lstinline{obj} contains the next iterated object.
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Target syntax (iteration)}
+
+  We want to be able to choose the name of the current object in the iteration.
+  \begin{itemize}
+  \item Each iterator will obviously expect its dedicated iteration variable type.
+  \end{itemize}
+
+  Remember we dispatch to \lstinline{array_forward()} by pointer tagging from \lstinline{in()}.
+
+  In the end, we'd like to be able to write:
+  \begin{lstlisting}
+    int *intp;
+    for each(&intp, in(array)) printf("int: %d\n", *intp);
+  \end{lstlisting}
+
+  Or even iterate combinatorial structures as simply as:
+  \begin{lstlisting}
+    int perm[6];
+    for each(perm, permutations(4,6)) {
+      /* Do something with current perm[0-3] indices */
+    }
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item Used extensively in the test template!
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Target syntax (search result)}
+  Very often, one not only needs to know whether an object was found:
+
+  \begin{lstlisting}
+    iterator_t found = map_get(map, key);
+
+    if (found.status>0) { /* Key has been found */
+
+      /* Can even iterate mappings from that of the key! */
+    }
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item {\em Must} be allocated {\em fast} (hence, on the stack!)
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Definition of iterators}
+
+  Fundamentally, an iterator has internal iteration state and a callback for \lstinline{next()}:
+  \begin{lstlisting}
+    typedef struct iterator_t {
+      int    status; /* error<0, 0==finished, next found>0 */
+      void  *ds; /* Having one pointer near is always nice */
+      char   on_stack[ITER_STACK_STATE]; /* Iterator state */
+      /* Actual iteration callback:                        */
+      int  (*next)(struct iterator_t *it, void *itervarp);
+    } iterator_t;
+  \end{lstlisting}
+
+  To polish our iterator interface, we now obviously have to write:
+  \begin{lstlisting}
+    #define next(itp,itervarp) \
+        (((itp)->status = (itp)->next(itp,itervarp))>0)
+    
+    #define each(itervarp,iter) \
+        ( iterator_t it=iter ; next(&it,itervarp) ; )
+  \end{lstlisting}
+  
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Writing iterator \lstinline{next()} callbacks}
+
+  \begin{itemize}
+  \item Now only two functions are needed to get any iteration pattern for any structure!
+  \end{itemize}
+  The last trick is to cast the flat space on stack to any actual internal iterator state.
+
+  The first function to write is the (\lstinline{static}) \lstinline{next()} callback:
+  
+  \begin{lstlisting}
+    static int foo_iter_next(iterator_t *it, void *itervarp) {
+      struct {
+        /* Cast flat state stack space to arbitrary state    */
+      } *state = it->on_stack; 
+
+      /* (1) Test end-of-iteration, return 0 if finished     */
+
+      /* (2) Evolve *itervarp with currently iterated object */
+
+      /* (3) Evolve state for the next iteration, return 1   */
+    }
+  \end{lstlisting}
+
+  Consequence: The constructor must point a new iterator to its first object (if it exists).
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Writing iterator constructors}
+
+  The second function, which must be public, is the iterator constructor:
+  
+  \begin{lstlisting}
+    iterator_t foo_iter(void *tagged) {  /* Iter constructor */
+      iterator_t it;
+      struct {
+        /* Cast flat state stack space to arbitrary state    */
+      } *state = &it.on_stack; 
+
+      it.next = foo_iter_next; /* Set up callback for next() */
+
+      /* (1) Init iteration state from 'tagged' parameter    */
+
+      /* (2) Init it.status accordingly                      */
+
+      return it;
+    }
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Iterator recap}
+
+  \begin{enumerate}
+  \item Surprisingly useful as a generic search return value;
+  \item Syntax allows to write many algorithms just like in the textbook;
+  \item Any structure may be iterated in this framework;
+    \begin{itemize}
+    \item Some iterators will allocate on the heap anyway (breadth-first on graphs);
+    \item Add cleanup callback, provide syntax for explicit iteration cancellation.
+    \end{itemize}
+  \item We also provide {\em generators} to iterate a few useful (combinatorial) structures:
+    \begin{itemize}
+    \item Integer \lstinline{range()}, floating point \lstinline{linspace()}
+    \item Lexical \lstinline{combinations()}
+    \item Lexical or random \lstinline{permutations()}
+    \end{itemize}
+  \item If an iterator needs be passed to another function, add a thin encapsulation layer:
+    \begin{lstlisting}
+      iterator_t *iterator(iterator_t it) {
+        return memcpy(block(sizeof(it)), &it, sizeof(it));
+      }
+    \end{lstlisting}
+  \end{enumerate}
+  
+\end{frame}
+
+
+% ======================================================================
+\subsection{Resizable arrays}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Target syntax}
+
+  \begin{itemize}
+  \item Size known at array creation, your ordinary array needs no resize:
+  \end{itemize}
+  \begin{lstlisting}
+    int *arr = array_of(N, int);
+
+    for (int i = 0 ; i < N ; i++) arr[i] = i;
+
+    array_delete(&arr);
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item Unknown size at array creation, just push/pop---triggering resizes automagically!
+  \end{itemize}
+  \begin{lstlisting}
+    int *arr = NULL; /* You've read it correctly */
+
+    for (int i = 0 ; i < N ; i++) array_push(&arr, &i);
+
+    array_delete(&arr);
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item We cannot \lstinline{array_push()} to a fixed-size array (like that of the first example!)
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Resizing rationale}
+
+  \begin{itemize}
+  \item A \lstinline{dynamic} array is initialized with zero length, otherwise it's a fixed-size array;
+  \item Calling \lstinline{calloc()} is deemed costly (it is);
+  \item Idea: allocate more array slots (\lstinline{capacity}) than actually used (\lstinline{length})
+    \begin{itemize}
+    \item Amortized heap allocation: use geometric ({\em e.g.} 1.3) array \lstinline{capacity} progression
+    \end{itemize}
+  \item When pushing, first check whether resize is needed (\lstinline{length==capacity})
+  \item Pass array slot size (\lstinline{stride}) to appropriate functions
+  \end{itemize}
+
+  \begin{lstlisting}
+    typedef struct {
+      struct {
+        int     dynamic;
+        int     stride;
+      }         prop;
+      size_t    capacity;
+      size_t    length;
+    } array_hdr_t; /* Array header is hidden metadata */
+  \end{lstlisting}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Core interface}
+
+  \begin{itemize}
+  \item A resize will generally change the array (address), so pass its address!
+  \item Silently pass \lstinline{stride} to \lstinline{array_push()} to call constructor if needed.
+  \end{itemize}
+
+  \begin{lstlisting}
+    void   *array__(size_t stride,size_t len,allocator_t *al);
+    #define array_of(N,T) array_new__(sizeof(T),N,NULL)
+    #define array(T)      array_of(0,T)
+    
+    void    array_delete__(void **taggedp);
+    #define array_delete(taggedp) \
+        array_delete__((void**)(taggedp))
+    
+    size_t  array_push__(void **taggedp,void *obj,size_t sz);
+    #define array_push(taggedp,obj) \
+        array_push__((void**)(taggedp),obj,sizeof(*obj))
+
+    size_t  array_pop__(void **taggedp,void *obj,size_t sz);
+    #define array_pop(taggedp,objp) \
+        array_pop__((void**)(taggedp),objp,sizeof(*objp))
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ======================================================================
+\section{Maps}
+
+% ======================================================================
+\subsection{Accomodating many data structures}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Definitions}
+
+  \begin{itemize}
+  \item A {\em map} is a collection of unique key/value associations ({\em mappings});
+  \item A map in which mappings have no value is a {\em set} (its elements are the map keys);
+    \begin{itemize}
+    \item Use sets for benchmarking maps (no value processing overhead)
+    \end{itemize}
+  \item A mapping is stored in a {\em bucket}
+    \begin{itemize}
+    \item Logical storage, implementation-dependent (tree node, hashtable collision list, {\em etc.})
+    \end{itemize}
+  \item A bucket corresponds to one or more (ordered) {\em slots}
+    \begin{itemize}
+    \item Physical storage, implementation-independent (slot {\em store} provided by the map)
+    \item A bucket is designated by its first slot
+    \end{itemize}
+  % \item Many data structures can implement the map abstract data type.
+  \end{itemize}
+
+  Interface
+
+  \begin{itemize}
+  \item Creation/deletion
+  \item Lookup key
+  \item Insert new key/value mapping, or update value of existing key
+  \item Remove key/value mapping
+  \end{itemize}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Maps in practice}
+
+  \begin{itemize}
+  \item Countless applications
+    \begin{itemize}
+    \item DB, names to phone numbers, parameters and their value, symbol tables, {\em etc.}
+    \end{itemize}
+  \item Operational constraints may vary:
+    \begin{enumerate}
+    \item {\em Track insertion order!} (which everyone assumes, but is not trivial)
+    \item More often than not, data is inserted in some (quasi-)order
+    \item Many inserts/updates/lookups, less removals (typical DB: 20\% removals during init)
+    \item Available memory: automatically adjust with \lstinline{map_resize()}
+    \item Bounded worst-case lookup time (hard!)
+    \end{enumerate}
+  \item The only better map is that which can accomodate more situations
+    \begin{itemize}
+    \item Have a selected set of options to build tailored map code!
+    \end{itemize}
+  \item Track insertion order w/ unbounded \#insert array (\lstinline{map->store.order})
+    \begin{itemize}
+    \item \lstinline{LinkedHashmap} (Java) too specific, too slow, wastes too much memory
+    \item Only need to mark erasures (with socalled {\em tombstones})
+    \item Rebuild \lstinline{map->store.order} on actual \lstinline{map_resize()}, filtering out tombstones
+    \end{itemize}
+    \item Insertion order is the map iteration order (only skip tombstones)
+  \end{itemize}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Memory models}
+
+  \begin{itemize}
+  \item Physical storage is a map responsibility (\lstinline{store_insert()}/\lstinline{store_remove()})
+  \item Most maps in existence will rarely store billions of mappings.
+    \begin{itemize}
+    \item You're wasting 32 bits / pointer on a 64-bit machine
+    \item End of cheap memory era (AI demand + geopolitics)
+    \end{itemize}
+  \item Internally replace plain C pointers with customizable \lstinline{index_t} (and markers)
+  \end{itemize}
+
+  \begin{lstlisting}
+    #include <stdint.h>
+    #ifdef ds_huge
+    typedef uint64_t        index_t;
+    #define INDEX_EMPTY     0xffffffffffffffffull
+    #define INDEX_TOMBSTONE 0xfffffffffffffffeull
+    #else /* 32-bit internal pointers by default */
+    typedef uint32_t        index_t;
+    #define INDEX_EMPTY     0xfffffffful
+    #define INDEX_TOMBSTONE 0xfffffffeul
+    #endif
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Memory models (cont'd)}
+
+  \begin{itemize}
+  \item Special out-of-band markers semantics:
+    \begin{itemize}
+    \item \lstinline{INDEX_EMPTY}: ``has never been used so far''
+    \item \lstinline{INDEX_TOMBSTONE}: ``has been erased''
+    \item Any other value (starting from \lstinline{0}) is an index in any internal map array
+    \end{itemize}
+  \end{itemize}
+
+  \begin{lstlisting}
+    #define index_is_empty(idx)   ((idx)==INDEX_EMPTY)
+    #define index_is_freed(idx)   ((idx)==INDEX_TOMBSTONE)
+    #define index_is_free(idx)    ((idx)>=INDEX_TOMBSTONE)
+    #define index_free(idxp)     (*(idxp)=INDEX_TOMBSTONE)
+  \end{lstlisting}
+
+  As a consequence, fastest reset/init of any \lstinline{index_t} array in a map with:
+  \begin{lstlisting}
+    memset(array, 0xff, array_length(array)*sizeof(*array));
+  \end{lstlisting}
+
+  Applies to:
+  \begin{itemize}
+  \item Resizing the insertion order array \lstinline{map->store.order}
+  \item Node ``pointers'' in recursive data structures (empty list/tree, {\em etc.})
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Slot store}
+
+  Our slot store will maintain the list of slots that are currently free:
+  \begin{lstlisting}
+    #define freelist_is_empty(store) \
+        index_is_empty((store).free_list)
+    
+    typedef struct {
+      slot_t     *slot;        /* Storage area (flat array) */
+      index_t     free_list;   /* Free slots list head!     */
+      size_t      nfree;       /* Accessed often            */
+
+      index_t    *order;       /* Track insertion order     */
+      size_t      ntombstones; /* Track sparseness measure  */
+    } store_t;
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item At store init, put all slots of resizable array \lstinline{slot} in the free list;
+  \item \lstinline{store_insert()} pops from the free list, \lstinline{store_remove()} pushes to it;
+    \begin{itemize}
+    \item {\em Very} fast $O(1)$ operations: free list only used as a stack;
+    \end{itemize}
+  \item Kind of a dedicated, internal arena allocator (only supporting slots.)
+  
+  \end{itemize}
+    
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Slot design}
+
+  \begin{itemize}
+  \item A \lstinline{slot_t} will obviously store a mapping:
+    \begin{lstlisting}
+      typedef struct {
+        key_t   key;   /* maps and sets */
+      #ifdef value_t
+        value_t value; /* maps only     */
+      #endif
+      } mapping_t;
+    \end{lstlisting}
+  \item To fully accomodate the upstream map requirements, a \lstinline{slot_t} also must feature:
+    \begin{enumerate}
+    \item Some \lstinline{index_t next_free} info for the next slot in the free list;
+    \item An \lstinline{index_t pos} to point in the \lstinline{store.order} array.
+    \end{enumerate}
+  \item The rest depends on the actual backend:
+    \begin{itemize}
+    \item Hashtable (\lstinline{ds_backend_table}) {\em vs.} some recursive structure (\lstinline{ds_backend_nodes});
+    \item Whether it uses a hash value (\lstinline{ds_backend_uses_hash})
+
+      Hashtables obviously do, yet also some tree structures (hashtries, treaps).
+    \end{itemize}
+  \end{itemize}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Slot design (cont'd)}
+
+  \begin{lstlisting}
+    typedef struct {
+      mapping_t kv;    /* actual key/value storage!   */
+    #ifdef ds_backend_uses_hash
+      hash_t    hash;  /* store hash close to the key */
+    #endif
+      index_t   pos;   /* index into insertion order  */
+    #if defined(ds_backend_table)
+      union {
+        index_t next_free;       /* When slot is free */
+        index_t next_chain;      /* Closed addressing */
+        index_t psl;             /* Open addressing   */
+      }         meta;
+    #elif defined(ds_backend_nodes)
+      index_t   node[1<<ds_backend_nodes] /* Pointers */
+    #endif
+    } slot_t;
+  \end{lstlisting}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Slot design (discussion)}
+
+  For hashtables, we use a \lstinline{union} (\lstinline{meta}) to have different names for the same \lstinline{index_t}, {\em depending on the current usage of the slot}:
+
+  \begin{itemize}
+  \item If it's free, this index is called \lstinline{next_free}, it is that of the next slot in the free list;
+  \item Otherwise, it is called either:
+    \begin{itemize}
+    \item \lstinline{next_chain}: Index of the next slot in a collision list (closed addressing), or
+    \item \lstinline{psl}: Some valuable info (open addressing, more later.)
+    \end{itemize}
+  \end{itemize}
+  
+  For recursive structures, we only need some $2^{\mbox{\lstinline{ds_backend_nodes}}}$ array of \lstinline{index_t} pointer(s) to the next slot(s) in the structure:
+  \begin{itemize}
+  \item If \lstinline{ds_backend_nodes} is 0, we have one pointer and the structure is a list;
+  \item If it is 1, we have two pointers for a binary tree (BST, treap, basic hashtrie);
+  \item It it is bigger, the tree has (exponentially) higher arity (general hashtries.)
+  \end{itemize}
+
+  {\em Now for the neat trick:} In either case, at least one \lstinline{index_t} exists (either \lstinline{meta} or \lstinline{node[0]}), so free slots are handled uniformly identically.
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{A universal design for maps}
+
+  Then any map is some logical structure built upon physical storage:
+  \begin{lstlisting}
+    struct T {
+      map_header_t hdr;   /* Length, callbacks, etc.         */
+      map_stats_t  stats; /* Instrumentation (benchmarking)  */
+
+      store_t      store; /* Storage + insert order tracking */
+
+      index_t     *bucket;   /* Logical structure storage    */
+      size_t       dim;      /* Logical structure dimension  */
+
+      uint8_t     *control;  /* Support ultra-fast lookups   */
+    };
+  \end{lstlisting}
+
+  All maps have \lstinline{dim} logical \lstinline{bucket}'s:
+  \begin{itemize}
+  \item Hashtables will use (special) primes or powers-of-two for \lstinline{dim};
+  \item Recursive structures all keep \lstinline{dim==1} (one list head, one tree root.)
+  \end{itemize}
+  
+\end{frame}
+
+
+% ======================================================================
+\subsection{Map candidates}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Pseudocode for maps: \lstinline{map_get()}}
+
+  \begin{itemize}
+  \item This one is merely boiler-plate code around iterators.
+  \end{itemize}
+
+  \begin{lstlisting}
+    iterator_t map_get(T map, key_t key) {
+      iterator_t notfound = { 0 };
+      index_t    slot;
+      
+      if (impl_lookup(map, key, &slot))
+      
+        return map_iter(map, map->store[slot].pos);
+      
+      else return notfound;
+    }
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Pseudocode for maps: \lstinline{map_remove()}}
+
+  \begin{itemize}
+  \item This one is pretty self-explanatory.
+  \end{itemize}
+  
+  \begin{lstlisting}
+    size_t     map_remove(T map, key_t key) {
+      index_t    slot;
+      
+      if (impl_remove(map, key, &slot)) {
+
+        size_t pos = map->store.slot[slot].pos;
+        map->store.order[pos] = INDEX_TOMBSTONE;
+
+        store_remove(map->store, slot);
+        map->hdr.length--;
+        map_resize(map);
+      }
+      
+      return map->hdr.length;
+    }
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Pseudocode for maps: \lstinline{map_put()}}
+
+  \begin{itemize}
+  \item Recursive structures will find a new bucket {\em inside} slots
+    \begin{itemize}
+    \item The reason we work with \lstinline{index_t *slot} (and for your headaches during resizes!)
+    \end{itemize}
+  \end{itemize}
+
+  \begin{lstlisting}
+    size_t     map_put(T map, key_t key, value_t value) {
+      index_t   *slot;
+
+      if (!impl_lookup_or_bucket(map, key, &slot)) {
+        
+        index_t idx = store_insert(&map->store, key, value);
+
+        map_put_idx(map, idx, slot);
+      }
+      else map->store.slot[*slot].value = value;
+
+      return map->hdr.length;
+    }
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Pseudocode for maps: \lstinline{map_put_idx()}}
+
+  \begin{itemize}
+  \item This one has to stand out to implement \lstinline{map_resize()}
+    \begin{itemize}
+    \item \lstinline{map_resize()} will reuse the store as it is
+    \item Then the mappings already have their indices in the store
+    \end{itemize}
+  \end{itemize}
+
+  \begin{lstlisting}
+    static void map_put_idx(T map, index_t idx, index_t *bkt) {
+      size_t ins_order = array_push(&map->store.order,&idx)-1;
+
+      map->store.slot[idx].pos = ins_order;
+
+      impl_insert(map, idx, bkt);
+      
+      map->hdr.length++;
+      map_resize(map);
+    }
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Implementation candidates}
+
+  Any implementation backend that can provide the following makes a valid map:
+
+  \begin{itemize}
+  \item \lstinline{int  impl_lookup(T map, key_t key, index_t *slot);}
+
+    Lookup \lstinline{key} in \lstinline{map}, return zero if not found.
+    
+    Otherwise: update \lstinline{*slot} with store index of result and return non-zero.
+  \item \lstinline{int  impl_remove(T map, key_t key, index_t *slot);}
+
+    Lookup \lstinline{key} in \lstinline{map}, return zero if not found.
+    
+    Otherwise: delete mapping from \lstinline{map} structure, update \lstinline{*slot} with index of the mapping to be removed from store, and return non-zero.
+  \item \lstinline{void impl_insert(T map, index_t idx, index_t *bucket);}
+
+    Insert in \lstinline{map} bucket \lstinline{*bucket} the new mapping stored at index \lstinline{idx}.
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Implementation candidates (cont'd)}
+
+  \begin{itemize}
+  \item \lstinline{int  impl_lookup_or_bucket(T map, key_t key, index_t **bucketp);}
+
+    {\em This one is the trickiest by far!}
+    
+    Lookup \lstinline{key} in \lstinline{map}.
+
+    If it is found, update \lstinline{*bucketp} with {\em address} of the slot ({\em in the store}) and return non-zero.
+
+    Otherwise: update \lstinline{*bucketp} with {\em address} of the bucket ({\em in the structure}) where to insert the new mapping and return zero.
+
+    {\em Depending on the return value, the index does not live in the same space!}
+
+  \item The rationale is to save as much work as possible (the lookup) for \lstinline{impl_insert()}.
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{A theoretical design for fair comparison}
+
+  What the maths say about \lstinline{dim} for quadratic addressing:
+  \begin{itemize}
+  \item Primes that will allow for complete \lstinline{bucket}'s exploration equal 3 (mod 4);
+  \item Enforcing the same constraint for powers-of-two implies using {\em triangular numbers}.
+  \end{itemize}
+
+  Other hashtables immune to the issue, explore all buckets:
+
+  \begin{itemize}
+  \item If option \lstinline{ds_ht_primes} is defined, select primes for \lstinline{dim} (with 1.3 growth factor);
+  \item Otherwise, default to powers-of-two (a choice had to be made.)
+  \end{itemize}
+
+  Recursive structures not affected (only one bucket.)
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Map recap}
+
+  \begin{itemize}
+  \item Some abstraction layer between:
+    \begin{itemize}
+    \item Top: Expectations of upstream algorithms (insertion order, storage, iteration, {\em etc.});
+    \item Bottom: The logical essence of the various ways of inserting/searching data.
+    \end{itemize}
+
+  \item Decoupling physical/logical storage is instrumental (much code is reused);
+  \item High-end testing ground for practical complexity assessments:
+    \begin{itemize}
+    \item Integrated, templated tests and benchmarks;
+    \item Evaluate the effect of any backend option in any practical scenario;
+    \end{itemize}
+    \item Eventually: battle-tested, modular, generic code for fastest maps/sets in plain C.
+  \end{itemize}
+
+\end{frame}
+
+

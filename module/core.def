@@ -1,0 +1,9 @@
+ifndef CORE
+
+CORE     = src/core/rval.o src/core/mem.o src/core/math.o src/core/fileutils.o src/core/opt.o src/core/tagging.o
+
+$(TESTS_DIR)/0-core   : $(CORE) $(TESTS_DIR)/0-core.o
+
+TESTS += $(TESTS_DIR)/0-core
+
+endif

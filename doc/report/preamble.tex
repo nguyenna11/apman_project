@@ -1,0 +1,128 @@
+% Tweaked from:
+% https://fr.overleaf.com/latex/templates/template-for-a-project-report-or-memoire/zcgzvcmrsxsb
+
+%====================== PACKAGES ======================
+
+\usepackage[english]{babel} % Change english -> french if needed
+\usepackage[utf8]{inputenc}
+\usepackage{float}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[colorinlistoftodos]{todonotes}
+\usepackage{url}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{setspace}
+\usepackage{abstract}
+\usepackage[T1]{fontenc}
+\usepackage[top=2cm, bottom=2cm, left=2cm, right=2cm]{geometry}
+\usepackage{subfig}
+\usepackage{listings}
+\usepackage{hyperref}
+
+\usepackage{xcolor}
+\usepackage{csquotes}
+\usepackage{fancybox}
+
+\newfloat{code}{htbp}{lop}
+\floatname{code}{Code}
+\DeclareCaptionSubType{code}
+
+\makeatletter
+\lst@Key{matchrangestart}{f}{\lstKV@SetIf{#1}\lst@ifmatchrangestart}
+\def\lst@SkipToFirst{%
+    \lst@ifmatchrangestart\c@lstnumber=\numexpr-1+\lst@firstline\fi
+    \ifnum \lst@lineno<\lst@firstline
+        \def\lst@next{\lst@BeginDropInput\lst@Pmode
+        \lst@Let{13}\lst@MSkipToFirst
+        \lst@Let{10}\lst@MSkipToFirst}%
+        \expandafter\lst@next
+    \else
+        \expandafter\lst@BOLGobble
+    \fi}
+\makeatother
+
+\usepackage[
+    backend=biber,
+    style=authoryear-icomp,
+    style=numeric,
+    sortcites,
+    natbib=true,
+    sorting=none,
+    url=false, 
+    doi=true,
+    eprint=false
+]{biblatex}
+\addbibresource{biblio.bib}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{1,1,1}
+\definecolor{orange}{rgb}{1, 0.65, 0}
+
+
+\lstdefinestyle{common}{
+  basicstyle=\footnotesize\ttfamily
+}
+
+\lstdefinestyle{boxed}{
+  style=common,
+  frame=single,
+  keywordstyle=\color{orange},% core keywords <<<<<
+  keywordstyle={[2]\color{codepurple}}, % built-ins <<<<
+  backgroundcolor=\color{backcolour},   
+  commentstyle=\color{red},       
+  numberstyle=\tiny\color{codegray},
+  stringstyle=\color{codegreen},
+  breaklines=true,
+  keepspaces=true,
+  tabsize=2,
+  numbers=left,
+  numberstyle=\tiny,
+  numbersep=10pt,
+  matchrangestart=t
+}
+
+\lstdefinestyle{asciiart}{
+  style=common,
+  columns=fixed,
+  fontadjust=true,
+  basewidth=0.5em
+}
+
+\lstdefinestyle{C}{
+  language=C,
+  style=boxed,
+  title=\texttt{\lstname},
+  captionpos=b
+}
+
+\lstdefinestyle{tex}{
+  language=tex,
+  style=boxed,
+  title=\texttt{\lstname},
+  captionpos=b
+}
+
+\makeatletter
+\newenvironment{asciiart}{% 
+\lstset{style=asciiart}\begin{Sbox}}{% Save the content in a box
+\end{Sbox}\centerline{\parbox{\wd\@Sbox}{\TheSbox}}}% And output it centered
+\makeatother
+
+%====================== INFORMATION ET REGLES ======================
+
+\setcounter{secnumdepth}{4}
+\setcounter{tocdepth}{1}
+
+\hypersetup{
+  pdftitle = {SEOC APMAN - C Programming},
+  pdfsubject = {Data Structures in C},
+  pdfkeywords = {C, data structures},
+  colorlinks = true,
+  pdfstartview={FitH}
+}
+
+\setlength{\parskip}{5pt plus2pt}
+

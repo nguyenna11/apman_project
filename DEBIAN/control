@@ -1,0 +1,8 @@
+Package: PACKAGE_NAME
+Version: PACKAGE_VERSION-PACKAGE_REVISION
+Architecture: PACKAGE_ARCH
+Depends: PACKAGE_DEPENDS
+Section: contrib/science
+Priority: optional
+Maintainer: PACKAGE_MAINTAINER <PACKAGE_EMAIL>
+Description: PACKAGE_DESCRIPTION

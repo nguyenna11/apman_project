@@ -1,0 +1,427 @@
+#!/usr/bin/python3
+
+import os
+import glob
+import subprocess
+import typer
+from typing import Optional
+from enum import Enum
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+app = typer.Typer(help="Automated benchmarking and plotting tool for maps.")
+
+class PresetEnum(str, Enum):
+    tiny = "tiny"
+    small = "small"
+    medium = "medium"
+    large = "large"
+
+class WorkloadEnum(str, Enum):
+    ascend = "ascend"
+    descend = "descend"
+    random = "random"
+
+class PlotFormatEnum(str, Enum):
+    png = "png"
+    pdf = "pdf"
+    eps = "eps"
+
+# Preset scale mapping: (initial_size, step_size, total_elements, runs)
+PRESETS = {
+    PresetEnum.tiny: (10, 10, 2500, 21),
+    PresetEnum.small: (125, 125, 25000, 11),
+    PresetEnum.medium: (1250, 1250, 250000, 7),
+    PresetEnum.large: (12500, 12500, 2500000, 5)
+}
+
+@app.command()
+def main(
+    except_impls: Optional[str] = typer.Option(
+        None, "--except", help="Comma-separated list of implementations to exclude (e.g. foo,bar)"
+    ),
+    preset: PresetEnum = typer.Option(
+        PresetEnum.small, "--preset", help="Benchmark size preset (tiny, small, medium, large)"
+    ),
+    workload: WorkloadEnum = typer.Option(
+        WorkloadEnum.random, "--workload", help="Workload type (ascend, descend, random)"
+    ),
+    plot_format: PlotFormatEnum = typer.Option(
+        PlotFormatEnum.png, "--plot", help="Plot file extension format (png, pdf, eps)"
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose output passed to benchmark executables"
+    ),
+    replot: bool = typer.Option(
+        False, "--replot", "-p", help="Assume csv files, redo the plots"
+    ),
+    experiment: Optional[str] = typer.Option(
+        None, "--experiment", help="Directory name inside 'experiment/' listing relevant executables in benchmark file"
+    )
+):
+    """Runs benchmarks and compiles plots into the 'output' directory."""
+    if not os.path.exists("build"):
+        typer.echo("Error: 'build' directory not found. Please compile your benchmark executables first.", err=True)
+        raise typer.Exit(code=1)
+
+    # Ensure the unified output directory exists
+    if experiment:
+        output_dir = os.path.join("experiment", experiment, "output")
+    else:
+        output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+
+    if replot is False:
+
+        # Parse excluded implementations
+        excluded = set()
+        if except_impls:
+            excluded = {impl.strip() for impl in except_impls.split(",") if impl.strip()}
+
+        # Fetch configuration profile from preset
+        initial_size, step_size, total_elements, runs = PRESETS[preset]
+
+        # Determine executables based on --experiment or default glob pattern
+        executables = []
+        if experiment:
+            exp_file_path = os.path.join("experiment", experiment, "benchmark")
+            if not os.path.exists(exp_file_path):
+                typer.echo(f"Error: Experiment benchmark file not found at '{exp_file_path}'", err=True)
+                raise typer.Exit(code=1)
+
+            with open(exp_file_path, "r") as f:
+                for line in f:
+                    name = line.strip()
+                    if name:
+                        exe_path = os.path.join("build", f"set-bench-{name}")
+                        executables.append(exe_path)
+        else:
+            pattern = os.path.join("build", "set-bench-*")
+            executables = [f for f in glob.glob(pattern) if os.access(f, os.X_OK)]
+
+        if not executables:
+            typer.echo("No benchmark executables found to run.", err=True)
+            raise typer.Exit(code=1)
+
+        # --- 1. Run Benchmarks ---
+        for exe in executables:
+            if not os.path.exists(exe) or not os.access(exe, os.X_OK):
+                typer.echo(f"Warning: Executable '{exe}' does not exist or is not executable.", err=True)
+                continue
+
+            impl_name = os.path.basename(exe).replace("set-bench-", "")
+
+            if impl_name in excluded:
+                continue
+
+            csv_filename = f"{impl_name}.csv"
+            csv_path = os.path.join(output_dir, csv_filename)
+
+            typer.echo(f"[Running]  Workload: {workload.value} | Preset: {preset.value} | Implementation: {impl_name}")
+
+            cmd = [exe]
+            if verbose:
+                cmd.append("-v")
+
+            cmd.extend([
+                "-f", str(initial_size),
+                "-s", str(step_size),
+                "-t", str(total_elements),
+                "-r", str(runs),
+                "-d", workload.value
+            ])
+
+            try:
+                # Stream stderr live to terminal while writing stdout to CSV file
+                with open(csv_path, "w") as outfile:
+                    process = subprocess.Popen(cmd, stdout=outfile, stderr=subprocess.PIPE, text=True)
+                    for line in process.stderr:
+                        print(line, end="", flush=True)
+                    process.wait()
+                    if process.returncode != 0:
+                        typer.echo(f"Warning: Benchmark {impl_name} exited with status code {process.returncode}", err=True)
+            except Exception as e:
+                typer.echo(f"Error executing {exe}: {e}", err=True)
+
+
+
+    # --- 2. Generate Plots ---
+    csv_files = sorted(glob.glob(os.path.join(output_dir, "*.csv")))
+
+    if not csv_files:
+        typer.echo(f"No CSV result files found in '{output_dir}/' directory to generate plots.")
+        return
+
+    # Time performance metrics (ns/op)
+    time_metrics = [
+        ("put/abs", "Put / Absent", "plot_time_put_absent"),
+        ("get/abs", "Get / Absent", "plot_time_get_absent"),
+        ("get/pres", "Get / Present", "plot_time_get_present"),
+        ("rm/pres", "Remove / Present", "plot_time_remove_present")
+    ]
+
+    # Memory performance metrics (abpkv)
+    mem_metrics = [
+        ("abpkv", "Extra mem. / KV", "plot_mem_abpkv")
+    ]
+
+    typer.echo(f"[Plotting] Reading data from '{output_dir}/'...")
+
+    # Process time metrics
+    for col, title, base_filename in time_metrics:
+        variants = [
+            (f"{base_filename}.{plot_format.value}", False),
+            (f"{base_filename.replace('plot_time_', 'plot_time_nocold_')}.{plot_format.value}", True)
+        ]
+
+        for filename, discard_first_n in variants:
+            plt.figure(figsize=(8, 6))
+            data_found = False
+
+            for csv_file in csv_files:
+                try:
+                    df = pd.read_csv(csv_file)
+                    if df.empty:
+                        continue
+                    impl_name = df["impl"].iloc[0] if "impl" in df.columns else os.path.basename(csv_file)
+
+                    if col in df.columns:
+                        df_grouped = df.groupby("N").mean(numeric_only=True).reset_index()
+
+                        if discard_first_n and not df_grouped.empty:
+                            min_n = df_grouped["N"].min()
+                            df_grouped = df_grouped[df_grouped["N"] > min_n]
+
+                        if not df_grouped.empty:
+                            plt.plot(df_grouped["N"], df_grouped[col], marker="o", label=impl_name)
+                            data_found = True
+                except Exception as e:
+                    typer.echo(f"Error processing file {csv_file}: {e}", err=True)
+
+            if data_found:
+                handles, labels = plt.gca().get_legend_handles_labels()
+                if labels:
+                    common_prefix = os.path.commonprefix(labels)
+                    cleaned_labels = [label[len(common_prefix):] if label.startswith(common_prefix) else label for label in labels]
+                else:
+                    cleaned_labels = labels
+
+                if handles and cleaned_labels:
+                    sorted_pairs = sorted(zip(cleaned_labels, handles), key=lambda x: x[0])
+                    sorted_labels, sorted_handles = zip(*sorted_pairs)
+                    plt.legend(sorted_handles, sorted_labels)
+
+                exp_prefix = f"{experiment} | " if experiment else ""
+                cold_label = " [No Cold Cache]" if discard_first_n else ""
+                plt.title(f"Benchmark: {title} ({exp_prefix}{workload.value.capitalize()}){cold_label}", fontsize=14)
+                plt.xlabel("N (set size)", fontsize=12)
+                plt.ylabel("ns/op", fontsize=12)
+                plt.grid(True, linestyle="--", alpha=0.6)
+                plt.tight_layout()
+
+                output_plot_path = os.path.join(output_dir, filename)
+                plt.savefig(output_plot_path, dpi=300)
+                typer.echo(f" -> Saved plot: {output_plot_path}")
+
+            plt.close()
+
+    # Process memory metrics (abpkv)
+    for col, title, base_filename in mem_metrics:
+        variants = [
+            (f"{base_filename}.{plot_format.value}", False),
+            (f"{base_filename.replace('plot_mem_', 'plot_mem_nocold_')}.{plot_format.value}", True)
+        ]
+
+        for filename, discard_first_n in variants:
+            plt.figure(figsize=(8, 6))
+            data_found = False
+
+            for csv_file in csv_files:
+                try:
+                    df = pd.read_csv(csv_file)
+                    if df.empty:
+                        continue
+                    impl_name = df["impl"].iloc[0] if "impl" in df.columns else os.path.basename(csv_file)
+
+                    if col in df.columns:
+                        df_grouped = df.groupby("N").mean(numeric_only=True).reset_index()
+
+                        if discard_first_n and not df_grouped.empty:
+                            min_n = df_grouped["N"].min()
+                            df_grouped = df_grouped[df_grouped["N"] > min_n]
+
+                        if not df_grouped.empty:
+                            plt.plot(df_grouped["N"], df_grouped[col], marker="o", label=impl_name)
+                            data_found = True
+                except Exception as e:
+                    typer.echo(f"Error processing file {csv_file}: {e}", err=True)
+
+            if data_found:
+                handles, labels = plt.gca().get_legend_handles_labels()
+                if labels:
+                    common_prefix = os.path.commonprefix(labels)
+                    cleaned_labels = [label[len(common_prefix):] if label.startswith(common_prefix) else label for label in labels]
+                else:
+                    cleaned_labels = labels
+
+                if handles and cleaned_labels:
+                    sorted_pairs = sorted(zip(cleaned_labels, handles), key=lambda x: x[0])
+                    sorted_labels, sorted_handles = zip(*sorted_pairs)
+                    plt.legend(sorted_handles, sorted_labels)
+
+                exp_prefix = f"{experiment} | " if experiment else ""
+                cold_label = " [No Cold Cache]" if discard_first_n else ""
+                plt.title(f"Benchmark: {title} ({exp_prefix}{workload.value.capitalize()}){cold_label}", fontsize=14)
+                plt.xlabel("N (set size)", fontsize=12)
+                plt.ylabel("Bytes / mapping", fontsize=12)
+                plt.grid(True, linestyle="--", alpha=0.6)
+                plt.tight_layout()
+
+                output_plot_path = os.path.join(output_dir, filename)
+                plt.savefig(output_plot_path, dpi=300)
+                typer.echo(f" -> Saved plot: {output_plot_path}")
+
+            plt.close()
+
+    # --- 3. Generate Radar Plots with Variability Bands ---
+    radar_variants = [
+        ("radar_tradeoff", False),
+        ("radar_nocold_tradeoff", True)
+    ]
+
+    radar_metrics = ["put/abs", "get/abs", "get/pres", "rm/pres", "abpkv"]
+    radar_labels = ["Put/Abs", "Get/Abs", "Get/Pres", "Rm/Pres", "Memory"]
+
+    for base_filename, discard_first_n in radar_variants:
+        impl_data = {}
+        common_prefix = ""
+
+        all_labels_raw = []
+        for csv_file in csv_files:
+            try:
+                df = pd.read_csv(csv_file)
+                if df.empty:
+                    continue
+                impl_name = df["impl"].iloc[0] if "impl" in df.columns else os.path.basename(csv_file)
+                all_labels_raw.append(impl_name)
+
+                if discard_first_n and "N" in df.columns and not df.empty:
+                    min_n = df["N"].min()
+                    df = df[df["N"] > min_n]
+
+                if df.empty:
+                    continue
+
+                row_medians = []
+                row_lowers = []
+                row_uppers = []
+                valid_impl = True
+
+                for m in radar_metrics:
+                    if m in df.columns:
+                        med_val = df[m].median()
+                        lower_val = df[m].quantile(0.25)
+                        upper_val = df[m].quantile(0.75)
+                        if pd.isna(med_val):
+                            valid_impl = False
+                            break
+                        row_medians.append(med_val)
+                        row_lowers.append(lower_val)
+                        row_uppers.append(upper_val)
+                    else:
+                        valid_impl = False
+                        break
+
+                if valid_impl:
+                    impl_data[impl_name] = {
+                        "median": row_medians,
+                        "lower": row_lowers,
+                        "upper": row_uppers
+                    }
+            except Exception as e:
+                typer.echo(f"Error reading {csv_file} for radar plot: {e}", err=True)
+
+        if len(impl_data) > 0:
+            if all_labels_raw:
+                common_prefix = os.path.commonprefix(all_labels_raw)
+
+            # Global normalization bounds based on all medians to keep scaling consistent
+            all_medians_matrix = np.array([v["median"] for v in impl_data.values()])
+            min_vals = all_medians_matrix.min(axis=0)
+            max_vals = all_medians_matrix.max(axis=0)
+
+            val_range = max_vals - min_vals
+            val_range[val_range == 0] = 1.0
+
+            def normalize(arr):
+                res = 1.0 - (np.array(arr) - min_vals) / val_range
+                return np.clip(res, 0.05, 1.0)
+
+            normalized_data = {}
+            for impl, stats in impl_data.items():
+                cleaned_name = impl[len(common_prefix):] if impl.startswith(common_prefix) else impl
+                normalized_data[cleaned_name] = {
+                    "median": normalize(stats["median"]),
+                    # Note: for inverted scales, lower raw value is better (higher score),
+                    # so upper quartile (worse performance) becomes the lower bound of the band.
+                    "lower": normalize(stats["upper"]),
+                    "upper": normalize(stats["lower"])
+                }
+
+            sorted_impls = sorted(normalized_data.keys())
+
+            num_vars = len(radar_metrics)
+            angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+            angles += angles[:1]
+
+            fig = plt.figure(figsize=(8, 8))
+            ax = fig.add_subplot(polar=True)
+
+            for impl in sorted_impls:
+                med_vals = list(normalized_data[impl]["median"])
+                med_vals += med_vals[:1]
+
+                lower_vals = list(normalized_data[impl]["lower"])
+                lower_vals += lower_vals[:1]
+
+                upper_vals = list(normalized_data[impl]["upper"])
+                upper_vals += upper_vals[:1]
+
+                line, = ax.plot(angles, med_vals, linewidth=2, linestyle='solid', label=impl)
+                color = line.get_color()
+
+                # Render shaded variability band (Interquartile range envelope)
+                ax.fill_between(angles, lower_vals, upper_vals, color=color, alpha=0.15)
+
+            ax.set_theta_offset(np.pi / 2)
+            ax.set_theta_direction(-1)
+
+            ax.set_xticks(angles[:-1])
+            ax.set_xticklabels(radar_labels, fontsize=11)
+
+            ax.set_rlim(0, 1.05)
+            ax.set_rticks([0.2, 0.4, 0.6, 0.8, 1.0])
+            ax.set_yticklabels(["", "", "", "", ""], color="grey", size=7)
+
+            ax.grid(True, linestyle="--", alpha=0.6)
+
+            handles, labels = ax.get_legend_handles_labels()
+            if handles and labels:
+                sorted_pairs = sorted(zip(labels, handles), key=lambda x: x[0])
+                sorted_labels, sorted_handles = zip(*sorted_pairs)
+                ax.legend(sorted_handles, sorted_labels, loc="upper right", bbox_to_anchor=(1.3, 1.1))
+
+            exp_prefix = f"{experiment} | " if experiment else ""
+            cold_label = " [No Cold Cache]" if discard_first_n else ""
+            plt.title(f"Trade-off view w/ IQR spread ({exp_prefix}{workload.value.capitalize()}){cold_label}", fontsize=14, y=1.1)
+            plt.tight_layout()
+
+            output_plot_path = os.path.join(output_dir, f"{base_filename}.{plot_format.value}")
+            plt.savefig(output_plot_path, dpi=300, bbox_inches="tight")
+            typer.echo(f" -> Saved radar plot with variability band: {output_plot_path}")
+            plt.close()
+
+if __name__ == "__main__":
+    app()
+

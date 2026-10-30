@@ -1,0 +1,10 @@
+ifndef UNITEST
+
+UNITEST      = src/unitest/unitest.o
+
+$(TESTS_DIR)/howto/0-examples-pass           : $(TESTS_DIR)/howto/0-examples-pass.o
+$(TESTS_DIR)/howto/1-examples-fail           : $(TESTS_DIR)/howto/1-examples-fail.o
+$(TESTS_DIR)/howto/ZZ-implementation-buggy   : $(TESTS_DIR)/howto/ZZ-implementation-buggy.o
+$(TESTS_DIR)/howto/ZZ-implementation-working : $(TESTS_DIR)/howto/ZZ-implementation-working.o
+
+endif

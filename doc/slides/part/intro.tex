@@ -1,0 +1,1098 @@
+% ======================================================================
+\section{Setting the stage}
+
+% ======================================================================
+\subsection{Preprocessor}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{What is it?}
+
+  \begin{itemize}
+  \item Commands that (conditionnally) transform text, {\em prior to compilation}
+    \begin{itemize}
+    \item \lstinline{#include}, \lstinline{#if}, \lstinline{#else}, \lstinline{#elif}, \lstinline{#endif}, \lstinline{#define}, \lstinline{#ifdef}, \lstinline{#ifndef}.
+    \end{itemize}
+  \item Two output facilities, one to trigger failure:
+    \begin{itemize}
+    \item \lstinline{#warning "You have been warned"}: compilation continues after printing
+    \item \lstinline{#error "teH iMPosSiBLe HaPpEneD!"}: compilation fails after printing
+    \end{itemize}
+  \item Two operators (your life just changed):
+    \begin{itemize}
+    \item \lstinline{# symbol}
+
+      will create {\em constant string} \lstinline{"symbol"} (symbol ``stringification'')
+    \item \lstinline{foo ## bar}
+
+      will create {\em symbol} \lstinline{foobar} (symbol concatenation)
+    \item One minor glitch: better used encapsulated, more later.
+    \end{itemize}
+  \item What is actually compiled is the output of the preprocessor.
+    \begin{itemize}
+    \item What about conditional copy-pastes that end up writing code for you?
+    \end{itemize}
+  \end{itemize}
+
+\end{frame}
+
+% % ----------------------------------------------------------------------
+\begin{frame}[fragile]{Example}
+
+  Crudeness of the preprocessor commands makes debugging them a little tedious:
+
+  \begin{lstlisting}
+    #include <stdint.h> /* Integers and their bounds */
+
+    #if UINTPTR_MAX == UINT64_MAX
+    #warning "64-bit pointers. Now that's a machine!"
+
+    #elif UINTPTR_MAX == UINT32_MAX
+    #warning "32-bit pointers. I like little gadgets too!"
+
+    #else
+    #error "I will refuse to compile on alien hardware"
+    #endif
+  \end{lstlisting}
+
+  There's no \lstinline{printf()}-like facility nor any C construct!
+
+  Except for (possibly parenthesized) logic/arithmetic testing with \lstinline{#if} and \lstinline{#elif}.
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Symbols}
+  
+  \begin{itemize}
+  \item Preprocessor symbols may or may not be defined.
+  \item When they are defined, they may or may not have a value.
+    \begin{itemize}
+    \item And when they have a value, it may or may not be a {\em macro}.
+    \end{itemize}
+  \end{itemize}
+
+  This will eventually let us achieve C code abstraction w.r.t.
+  \begin{itemize}
+  \item Machine-dependent features (pointer size, SIMD extensions, {\em etc.})
+    \begin{itemize}
+    \item Isolate code for bleeding-edge hardware, preserve safe fallback for production.
+    \end{itemize}
+  \item Lower-level implementation choices:
+    \begin{itemize}
+    \item \lstinline{set.h} $\rightarrow$ \lstinline{map.h} $\rightarrow$ \{ \lstinline{hashtable.h}, \lstinline{bst.h}, \lstinline{list.h} \}
+    \item \lstinline{set.h} will essentially build on \lstinline{put()}/\lstinline{get()} from \lstinline{map.h} to implement union, membership testing, symmetric difference, {\em etc.}
+
+      Any other structure providing \lstinline{put()}/\lstinline{get()} could be used.
+    \item \lstinline{map.h} will factor out all possible code so the core algorithmic differences are isolated in \lstinline{list.h}, \lstinline{bst.h} and \lstinline{hashtable.h}.
+    \end{itemize}
+  \end{itemize}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Preprocessor caveats (side-effects)}
+
+  Suppose we have:
+  \begin{lstlisting}
+    #define gen_abs(x) ((x)<0?-(x):(x))
+  \end{lstlisting}
+
+  If you use it with side-effects, a kitten will die:
+  \begin{lstlisting}
+    int a = -3;
+
+    int gabs = gen_abs(a++);
+
+    /* Expands to:   int gabs = ((a++)<0?-(a++):(a++));
+    
+       => The value of a is now -1, yet -2 was likely expected.
+    */
+  \end{lstlisting}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Preprocessor caveats (parentheses)}
+
+  Suppose we have:
+  \begin{lstlisting}
+    #define get_idx(p) p->idx
+  \end{lstlisting}
+
+  If you use it with pointer arithmetics, a kitten will die:
+  \begin{lstlisting}
+    struct foo_t { int idx; };
+    
+    struct foo_t *arr = calloc(42, sizeof *arr);
+    /* Fill arr as expected */
+    int id = get_idx(arr+2);
+
+    /* Expands to:   int id = arr+2->idx;
+    
+       => Syntax error.
+    */
+  \end{lstlisting}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Preprocessor caveats (do and don't)}
+
+
+  \begin{enumerate}
+  \item {\em Never} use a macro with side-effects in the argument(s);
+  \item Put parentheses around every parameter occurrence:
+  \begin{lstlisting}
+    #define get_idx(p) (p)->idx
+  \end{lstlisting}
+  And around the macro body itself if it's to be used inside other expressions:
+  \begin{lstlisting}
+    #define list_is_empty(list) ((list) == LIST_END_MARKER)
+  \end{lstlisting}
+  \end{enumerate}
+
+  {\em Incipit trag\oe dia.}
+  
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Arch.-dependent constants}
+
+  Suppose the start of some \lstinline{src/list.c}:
+  
+  \begin{lstlisting}
+    #include <stdint.h> /* Integers and their bounds */
+    /* We may have other plans for NULL */
+    #if   UINTPTR_MAX == UINT64_MAX
+    /* Define a symbol with a constant value */
+    #define LIST_END_MARKER ((void*)0xffffffffffffffffULL)
+    #elif UINTPTR_MAX == UINT32_MAX
+    #define LIST_END_MARKER ((void*)0xffffffffUL)
+    #else
+    #error "Unsupported architecture"
+    #endif
+
+    /* Define a *macro* symbol, works on 32/64-bit machines */
+    #define LIST_END(list) ((list) == LIST_END_MARKER)
+  \end{lstlisting}
+  
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Arch.-dependent constants}
+
+  Our \lstinline{src/list.c} may continue like:
+  
+  \begin{lstlisting}
+    #include <stddef.h> /* size_t */
+
+    size_t list_length(list_t l) {
+      size_t len = 0;
+
+      for ( ; !LIST_END(l) ; l = l->next)
+        len++;
+
+      return len;
+    }
+    
+    /* Plenty of code to finish implementing lists */
+
+    #undef LIST_END         /* Clean locally-defined symbols */
+    #undef LIST_END_MARKER
+  \end{lstlisting}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Arch.-dependent constants (cont'd)}
+
+  What the compiler will automatically get for compilation on a 32-bit machine:
+  
+  \begin{lstlisting}
+    size_t list_length(list_t l) {
+      size_t len = 0;
+
+      for ( ; !((l)==(void*)0xffffffffUL) ; l = l->next)
+        len++;
+
+      return len;
+    }
+  \end{lstlisting}
+
+  Use \lstinline{-E} compiler flag to get the preprocessor output.
+
+  {\em Warning!} This is very verbose (all the \lstinline{#include}'d contents is there).
+
+  You have to anticipate for the correct expansion of macros and symbol values!
+  
+\end{frame}
+  
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Conditional inclusion}
+
+  Suppose a higher-level \lstinline{include/structure.h}:
+  
+  \begin{lstlisting}
+    #if defined(TREE_STRUCT)
+
+    #include <structure/tree.h>
+
+    #elif defined(LIST_STRUCT)
+
+    #include <structure/list.h>
+
+    #else
+    #error "Unsupported/unspecified data structure"
+    #endif /* TREE_STRUCT, LIST_STRUCT */
+
+    /* Common code for all data structures */
+  \end{lstlisting}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Conditional inclusion}
+
+  Now in some \lstinline{code.c}, we'd certainly expect to be able to do:
+  
+  \begin{lstlisting}
+    #define LIST_STRUCT
+    #include <structure.h>
+    /* Will eventually include <structure/list.h> */
+  \end{lstlisting}
+
+  You may want to see \lstinline{LIST_STRUCT} as a {\em parameter} of the {\em template} \lstinline{structure.h}.
+
+  The idea is:
+  \begin{itemize}
+  \item to let the user specifiy an option (here: a data structure backend);
+  \item to factor out the maximum amount of code among options;
+  \item to have the preprocessor write the actual code for us.
+  \end{itemize}
+
+  This is the basic paradigm of metaprogramming: programming in program space.
+  \begin{itemize}
+  \item Scheme, Rust (and many others!) feature much more powerful such capabilities.
+  \item The C preprocessor \href{https://github.com/pfultz2/Cloak/wiki/Is-the-C-preprocessor-Turing-complete\%3F}{has internal limits} (and arguably a primitive syntax!)
+  \end{itemize}
+  
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Templating (motivation)}
+
+  Suppose you want a map to get the histogram of words (mutations) in a text (\textsc{dna}).
+  \begin{itemize}
+  \item The map keys are the (unique) words, their value is the word count in the text.
+  \end{itemize}
+
+  We want a {\em generic} map template that could be {\em instantiated} more or less like:
+  \begin{lstlisting}
+    #define key_t        char*
+    #define key_hash     word_hash
+    #define key_compare  wordptr_compare
+    #define value_t      size_t
+    #define tag          histogram
+    #include <structure/map.h>
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item Expected result: After line 6, we have the \lstinline{histogram_t} type and we can use \lstinline{histogram()} (the {\em constructor}), \lstinline{histogram_get()}, \lstinline{histogram_put()}, {\em etc.}
+  
+  \item Encapsulating concatenation is mandatory due to the preprocessor internals:
+  \begin{lstlisting}
+    #define CONCAT(foo,bar) foo ## bar
+    #define CAT(foo,bar)    CONCAT(foo,bar)
+  \end{lstlisting}
+\end{itemize}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Templating}
+
+  Now in \lstinline{map.h}, we first define ({\em prologue}) and then clean ({\em epilogue}) local symbols:
+
+  \begin{lstlisting}
+    /* Generic type name: T (map of any key/value types) */
+    #define T         CAT(tag,_t)   /* Symbolic prologue */
+    #define map_put   CAT(tag,_put)
+
+    typedef struct T *T;     /* Generic type declaration */
+
+    int map_put(T map, key_t key, value_t value) {
+      /* Insert/update key/value in map */
+    }
+
+    #undef map_put                  /* Symbolic epilogue */
+    #undef T
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item Except for the preprocessor markup, this {\em generic} code looks an awful like plain C!
+  \end{itemize}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Templating + polymorphism}
+
+  We better acknowledge our map may only be used as a set (no \lstinline{value_t} would exist).
+
+  Lines 7--9 of the previous slide may then become:
+
+  \begin{lstlisting}
+    #ifdef value_t
+    int map_put(T map, key_t key, value_t value) {
+      /* Insert or update key/value mapping in map    */
+    #else
+    int map_put(T map, key_t key) {
+      /* Try to insert key (element) in map (set)     */
+    #endif
+
+    /* Code that only relies on the key (most of it!) */
+
+    #ifdef value_t
+    /* Do the only difference due to having a value_t */
+    #endif
+
+    }
+    
+  \end{lstlisting}
+  
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Templating + polymorphism (cont'd)}
+
+  Obviously, polymorphism also extends to the definition of C \lstinline{struct}'s:
+
+    \begin{lstlisting}
+      #define mapping_t CAT(tag,_mapping_t)
+
+      struct {
+        key_t   key;
+      #ifdef value_t
+        value_t value;
+      #endif
+      } mapping_t;
+      
+      /* Don't forget to #undef mapping_t at the end! */
+      #ifdef value_t
+      #undef tag
+      #endif /* If coming from set.h, will be #undef'd there */
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item Here, no definition for \lstinline{value_t} means using the map as a set!
+  \end{itemize}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Templating (true code reuse)}
+
+  Now suppose \lstinline{set.h} is to be built from any structure providing \lstinline{put()}/\lstinline{get()}:
+
+  \begin{lstlisting}
+    #define T         CAT(tag,_t)
+    #define set_put   CAT(tag,_put)
+
+    #include <structure/map.h> /* Get map_put(), no value_t */
+    /* Or use conditional inclusion for even more backends! */
+
+    /* Since tag is the same (it is inherited in map.h), both
+       - set_put resolves to histogram_put in set.h (here) and
+       - map_put resolves to histogram_put in map.h => Profit!
+       Hence, only set ops remain to be described:       
+     */
+
+    #define set_union CAT(tag,_union)
+    
+    T  set_union(T set_A, T set_B) {
+    }
+  \end{lstlisting}
+  
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Packaging}
+
+  \lstinline{static} functions are {\em not visible} outside their file (their {\em Translation Unit}).
+  \begin{itemize}
+  \item Perfect for small, local functions of a greater, public code.
+  \end{itemize}
+
+  A function that lacks the \lstinline{static} qualifier is visible from outside.
+  \begin{itemize}
+  \item Library code (we need {\em access} to the \lstinline{cos}/\lstinline{exp}/{\em etc.} symbols from the math library.)
+  \end{itemize}
+
+  Forward prototypes declaration is either:
+  \begin{itemize}
+  \item sensible (\lstinline{static}):
+
+    Some of these functions may be mutually recursive. We've got that covered.
+  \item or mandatory (library):
+
+    Like in a \lstinline{.h} header file of the kind you were used to before.
+  \end{itemize}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Packaging (cont'd)}
+
+  Our single \lstinline{map.h} must take provision for both use cases (polymorphism removed):
+
+  \begin{lstlisting}
+    #ifndef ds_interface
+    #define ds_interface /* Default: visible functions    */
+    #endif
+    
+    /* First part: forward prototype + type declarations. */
+    ds_interface int map_put(T map, key_t key, value_t value);
+
+    /* Second part, only if we actually need the code:    */
+    #if !defined(export_interface)
+    ds_interface int map_put(T map, key_t key, value_t value) {
+      /* Blah. */
+    }
+    #endif
+
+    #undef ds_interface
+  \end{lstlisting}
+  
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Packaging (now unboxing!)}
+
+  Going back to our example, actual map code is only needed in \lstinline{histogram.c}:
+  \begin{lstlisting}
+    #include <stddef.h>  /* size_t */
+    #define key_t   char*
+    #define value_t size_t
+    #define tag     histogram
+    #include <structure/map.h>
+
+    double histogram_IQR(histogram_t histogram) {
+      /* Blah. */
+    }
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item Observe that the map type gets defined there, so we do {\em not} include \lstinline{histogram.h}.
+  \end{itemize}
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Include guard}
+  Now for \lstinline{histogram.h}, assuming at least one map function must be public:
+  \begin{lstlisting}
+    #ifndef HISTOGRAM_H
+    #define HISTOGRAM_H
+
+    #include <stddef.h>  /* size_t */
+    #define key_t   char*
+    #define value_t size_t
+    #define tag     histogram
+    #define export_interface /* No code needed this time */
+    #include <structure/map.h>
+
+    /* Additional functions: */
+    double histogram_IQR(histogram_t histogram);
+    
+    #endif /* HISTOGRAM_H guard */
+  \end{lstlisting}
+
+  The guard prevents redefining the symbols (which is illegal) upon multiple inclusions.
+
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Local inlining}
+
+  A \lstinline{static inline}-qualified function {\em may} be inlined by the compiler:
+
+  \begin{itemize}
+  \item If its body is worth copy-pasting into the caller, we save the cost of function call.
+  \item Inlined code is then like macros, yet at the compiler level (with type-checking!)
+  \end{itemize}
+
+  Extremely useful to get the fastest maps:
+
+  \begin{lstlisting}
+    static inline int wordptr_compare(const void *_left, const void *_right) {
+      return strcmp(*(char**)_left, *(void**)_right);
+    }
+    
+    static inline size_t word_hash(char *w) {
+      size_t h = 1;
+      for (size_t a = 31 ; *w ; w++ , a *= 31) h += a**w;
+      return h;
+    }
+  \end{lstlisting}
+  
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Common pattern: Local inlining (cont'd)}
+
+  Some of our map functions {\em themselves} may be small.
+  \begin{itemize}
+  \item For benchmarking, we therefore take advantage of the \lstinline{ds_interface} option.
+  \end{itemize}
+
+  After \lstinline{wordptr_compare} and \lstinline{word_hash}, finish instantiating the fastest possible code:
+  \begin{lstlisting}
+    #define key_t         char*
+    #define value_t       size_t
+    #define key_compare   wordptr_compare
+    #define key_hash      word_hash
+    #define ds_interface  static inline
+    #include <structure/map.h>
+  \end{lstlisting}
+
+  If our comparison and/or hash functions are small enough, then we'll have fast code.
+
+  Like, {\em really} fast.
+
+  Once we've tuned one or two more things!
+  
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Preprocessor recap}
+
+  Combined, the previous techniques allow for:
+  \begin{enumerate}
+  \item Type-independent (generic) programming;
+  \item Generation of the fastest possible code for each actual types;
+  \item True reuse and seamless extension of generic code;
+  \item Arbitrarily complex data structure implementations;
+  \item Sensible user interface.
+  \end{enumerate}
+
+  To get them right at the same time for some real code is tedious (but not really hard).
+
+  So we give the 1200 lines of \lstinline{map.h}.
+  \begin{itemize}
+  \item You now have all the cards to understand them.
+  \end{itemize}
+
+  Of course, map tests and benchmarks have all been templated too.
+  
+\end{frame}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{True preprocessor madness}
+
+  What precedes is purely ``standard practice'' in advanced (and embedded) C.
+
+  \begin{itemize}
+  \item More advanced use of the preprocessor may be leveraged for \href{https://github.com/Hirrolot/awesome-c-preprocessor}{even more generality}.
+  
+  \item Arguably one of the most extreme pushes along these lines is the \href{https://github.com/P-p-H-d/mlib}{\lstinline{M*LIB}} library.
+    \begin{itemize}
+    \item Even programs get abstracted;
+    \item Many (much) more involved techniques inside.
+    \end{itemize}
+  \end{itemize}
+
+\end{frame}
+
+% ======================================================================
+\subsection{Debugging}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Separation of concerns}
+
+  \begin{itemize}
+  \item A search procedure in a heap that ends up exploring a negative backend array index has a {\em broken invariant} (a proper bug);
+  \item A file that cannot be found because the user misspelled the name is treated by {\em explicit error handling}.
+  \end{itemize}
+
+  Bugs must be detected as early as possible and cause the program to abort.
+  \begin{itemize}
+  \item Encompasses failed pre-/post-conditions ({\em incl.} failed allocations).
+  \end{itemize}
+
+  Errors might be recoverable, should have a dedicated interface.
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Standard debugging}
+
+
+  Debugging is essentially about actually enforcing your code {\em invariants}.
+
+  \begin{itemize}
+  \item By default, code is compiled in debug mode
+  \item Release mode: \lstinline{#define NDEBUG} (well-known preprocessor switch)
+  \end{itemize}
+
+  Code that is explicitly executed when not in release mode:
+  \begin{itemize}
+  \item \lstinline{assert(invariant);} (see \lstinline{man 3 assert})
+    \begin{itemize}
+    \item More useful variant: \lstinline{assert(invariant && "Bug reason")}
+    \end{itemize}
+  \item With explicit preprocessor markup:
+    \begin{lstlisting}
+      #ifndef NDEBUG
+      fprintf(stderr, "Searching at index: %d\n", idx);
+      #endif
+    \end{lstlisting}
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful debugging}
+
+  \begin{itemize}
+  \item By default, you want all your invariants be checked;
+  \item But you also want to turn on/off extra debugging for the specific module \lstinline{foo}.
+  \end{itemize}
+
+  Use a \lstinline{DEBUG_FOO} preprocessor switch symbol:
+  \begin{itemize}
+  \item Un/comment \lstinline{DEBUG_FOO} definition to de/activate extra debugging code.
+  \item Plenty of examples below.
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful debugging (example)}
+
+  Use builtin \lstinline{__func__} and \lstinline{__LINE__} symbols.
+  
+  Then in some function belonging to \lstinline{src/foo.c}:
+
+  \begin{lstlisting}
+    #include <foo.h>
+    // #define DEBUG_FOO // Extra debug switch
+
+    void foo_bar(foo_t foo) {
+
+    #if !defined(NDEBUG) && defined(DEBUG_FOO)
+      fprintf(stderr, "%s:%d: Arg foo: %p\n", __func__, __LINE__, foo);
+    #endif
+      /* Check pre-condition independently of DEBUG_FOO */
+      assert(foo!=NULL && "NULL argument for foo_bar");
+
+      /* Actual code for foo_bar */
+    }
+  \end{lstlisting}
+  
+\end{frame}
+
+
+% ======================================================================
+\subsection{Error handling}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Standard error handling}
+
+  \begin{lstlisting}
+    #include <stdio.h>  /* fopen()    */
+    #include <errno.h>  /* errno      */
+    #include <string.h> /* strerror() */
+
+    FILE *fun(char *filename) {
+      FILE *fp;
+
+      fp = fopen(filename,"rt");
+      if (NULL==fp) {
+        fprintf(stderr, "%s:%d: fopen(%s): %s.\n", __func__, __LINE__, filename, strerror(errno));
+        return NULL;
+        /* Caller only knows about an error, not which one */
+      }
+
+      return fp;
+    }
+  \end{lstlisting}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Standard error handling (discussion)}
+
+  \begin{itemize}
+  \item Nice, system-wide interface
+  \item But not all functions will modify \lstinline{errno}
+  \item Errors ({\em and their cause!}) do not propagate easily
+  \item Applicative code needs a more streamlined abstraction
+  \end{itemize}
+
+  General solution: unified type for value {\em or} error (and cause)
+  
+  \begin{itemize}
+  \item Kernel-land trick: use reserved address range to encode error codes as pointers
+  \item Below: user-land proposal (portable), as in Rust/OCaml/{\em etc.}
+  \end{itemize}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful error handling}
+
+  Applicative code essentially manipulates pointers:
+  \begin{lstlisting}
+    typedef struct {
+      int  error;
+      void *data;
+    } rval_t;
+  \end{lstlisting}
+
+  \begin{itemize}
+  \item \lstinline{error==0} indicates success, with (possibly unused) actual return value in \lstinline{data};
+  \item \lstinline{error>0} is an error code, with unused \lstinline{data} (reuse/extend \lstinline{errno} error codes!)
+  \end{itemize}
+  
+  \begin{lstlisting}
+    rval_t rval(int error, void *data) {
+      return (rval_t){.error=error, .data=data};
+    }
+    #define OK(data)      rval(0,data)
+    #define ERR(errno)    rval(errno,NULL)
+    #define IS_ERR(rv)  ((rv).error > 0)
+    #define RVAL(rv)     (rv).data
+    #define RCODE(rv)    (rv).error
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful error handling, with optional return flow tracing}
+
+  \begin{lstlisting}
+    // #define DEBUG_RETFLOW /* Uncomment to print returns */
+    typedef struct {
+      int  error;
+      void *data;
+    } rval_t;
+    
+    #if !defined(NDEBUG) && defined(DEBUG_RETFLOW)
+    rval_t rval(int error, void *data, char *func, int line);
+    #define OK(data)      rval(0,data,__func__, __LINE__)
+    #define ERR(errno)    rval(errno,NULL,__func__,__LINE__)
+    #else
+    rval_t rval(int error, void *data);
+    #define OK(data)      rval(0,data)
+    #define ERR(errno)    rval(errno,NULL)
+    #endif
+    /* Predicate IS_ERR and accessor RVAL keep the same */
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful error handling, with optional return flow tracing (cont'd)}
+
+  \begin{lstlisting}
+    rval_t rval(int error, void *data
+    #ifndef NDEBUG
+                , char *func, int line
+    #endif
+                ) {
+      
+    #if !defined(NDEBUG) && defined(DEBUG_RETFLOW)
+    #include <stdio.h>
+      fprintf(stderr, "[%16s:%d]  return ", func, line);
+      if (error>0) fprintf(stderr, "ERROR(%d) ", error);
+      fprintf(stderr, "\n");
+    #endif
+
+      return (rval_t){.error=error, .data=data};
+    }
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ======================================================================
+\subsection{Memory management}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Standard memory management}
+
+  \begin{lstlisting}
+    #include <stdlib.h>
+    
+    int main(void) {
+      void *ptr = malloc(42);
+      
+      free( ptr );
+      
+      printf("ptr=%p\n", ptr);
+      
+      exit(EXIT_SUCCESS);
+    }
+  \end{lstlisting}
+  
+  \begin{itemize}
+  \item Fine-grained allocations only
+  \item Should check for \lstinline{ptr!=NULL}
+  \item Not easy to trace, debug, nor extend
+  \item \lstinline{ptr} keeps its value after the call to \lstinline{free()}
+  \end{itemize}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful memory management: allocators}
+
+  \begin{itemize}
+  \item Store allocator info before block.
+    \begin{itemize}
+    \item Default \lstinline{NULL} allocator maps to standard \lstinline{malloc()}/\lstinline{free()} allocator.
+    \end{itemize}
+  \item Enforce \lstinline{NULL} after deallocation.
+  \end{itemize}
+
+  \begin{lstlisting}
+    // #define DEBUG_MEM /* Uncomment to debug mem de/allocs */
+    
+    typedef struct {
+      void   *state; /* Allocator internal data */
+      void *(*allocate)(size_t size, void *state);
+      void  (*deallocate)(void **object_ptr, void *state);
+    } allocator_t;
+  \end{lstlisting}
+
+  Ultimately, make any object {\em propagate} its allocation policy:
+  \begin{itemize}
+  \item Allocate rare objects with \lstinline{NULL} allocator;
+  \item Draw tree nodes from {\em e.g.}, an arena allocator
+    \begin{itemize}
+    \item Coarse-grained memory management useful for writing parsers, games, or GUI;
+    \item Key idea: delete all objects (AST subtrees, GUI widgets, {\em etc.}) in arena {\em in $O(1)$ time}.
+    \end{itemize}
+  \end{itemize}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful memory management: allocators (interface)}
+
+  \begin{lstlisting}
+    #if !defined(NDEBUG) && defined(DEBUG_MEM)
+    #include <stdio.h>
+    void   *alloc__(size_t size, allocator_t *allocator, char *fun, int line);
+    #define alloc(size,al) alloc__(size,al,__func__, __LINE__)
+    void    dealloc__(void **objp, char *fun, int line);
+    #define dealloc(objp)  dealloc__(objp,__func__, __LINE__)
+    #else
+    void   *alloc__(size_t size, allocator_t *allocator);
+    #define alloc(size,al) alloc__(size,al)
+    void    dealloc__(void **objp);
+    #define dealloc(objp)  dealloc__(objp)
+    #endif /* Augment alloc()/dealloc() with shortcuts: */    
+    #define block(sz) alloc(sz, NULL)
+    #define new(obj)  block(sizeof(*obj))
+    #define like(obj) alloc(sizeof(*obj),((allocator_t*)obj)-1)
+    #define del(objp) dealloc((void**)(objp))
+  \end{lstlisting}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful memory management: allocators (alloc)}
+
+  \begin{lstlisting}
+    void   *alloc__(size_t size, allocator_t *al
+    #if !defined(NDEBUG) && defined(DEBUG_MEM)
+                    , char *func, int line
+    #endif
+                   ) { /* Add space for pointer to allocator */
+      allocator_t *ptr = al ?
+                    al->allocate(size+sizeof(ptr),al->state) : calloc( 1, size+sizeof(ptr) );
+      assert( ptr && "Alloc failed!" ); /* Univ. precond. */
+      *ptr = al; /* Propagate allocator info */
+    
+    #if !defined(NDEBUG) && defined(DEBUG_MEM)
+      fprintf(stderr, "[%16s:%d]  alloc %zu bytes at %p\n", func, line, size, ptr+1);
+    #endif
+      return ptr+1; /* Return address *after* allocator info */
+    }
+  \end{lstlisting}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful memory management: allocators (dealloc)}
+
+  \begin{lstlisting}
+    void   *dealloc__(void **objp
+    #if !defined(NDEBUG) && defined(DEBUG_MEM)
+                      , char *func, int line
+    #endif
+                     ) { /* Recover allocator info from objp */
+      if (objp && *objp) {
+        allocator_t **alp = ((allocator_t**)*objp)-1;
+    #if !defined(NDEBUG) && defined(DEBUG_MEM)
+        fprintf(stderr, "[%16s:%d]  dealloc at %p\n", *object_ptr, fun, line);
+    #endif
+        if (*alp)
+          (*alp)->deallocate(alp, (*alp)->state);
+        else free(alp);
+        *objp = NULL; /* No silver bullet, yet sane overall */
+      }
+    }
+  \end{lstlisting}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Powerful memory management: extensions}
+
+  \begin{enumerate}
+  \item In \lstinline{de/alloc__()}, add global number and total size of live memory blocks
+    \begin{itemize}
+    \item Monitor program memory usage, report statistics
+    \end{itemize}
+  \item In \lstinline{de/alloc__()}, add global {\em set} of live memory blocks
+    \begin{itemize}
+    \item Possibly with function/line info;
+    \item Program can reflect on the memory it uses;
+    \item Main application: interned (constant, unique) strings (Python VM);
+    \item Cosmetic application: no leaks on exit (register cleanup handler with \lstinline{atexit(3)})
+    \end{itemize}
+  \item Specialized, fast allocators for objects of known, constant size
+    \begin{itemize}
+    \item List links, tree nodes, {\em etc.} (we'll do that for maps!)
+    \end{itemize}
+  \end{enumerate}
+  
+  Overall goal: minimize number of calls to the default system allocator
+  \begin{itemize}
+  \item Ultimately, any allocator will have to use it anyway!
+  \item List of reusable blocks, {\em etc.}
+  \end{itemize}
+
+  At least, the infrastructure is ready for all of this.
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Recap}
+
+  All of the following also comes with switchable, extra debugging capabilities:
+  \begin{itemize}
+  \item Algorithms must check their invariants with \lstinline{assert()};
+  \item Procedural code uses \lstinline{rval_t} for control management;
+  \item Either you get a block from specified allocator, or program aborts.
+  \end{itemize}
+
+  Key techniques used:
+  \begin{itemize}
+  \item Ternary \lstinline{if-then-else} operator: \lstinline{test ? consequence : alternative}
+  \item Build on top of standards (\lstinline{NDEBUG}, \lstinline{errno}), seek retro-compatibility
+  \item Preprocessor (combined) switches, predefined \lstinline{__func__} and  \lstinline{__LINE__} macros
+    \begin{itemize}
+    \item \lstinline{__FILE__} also available for more fancy bloat;
+    \item Replace the \lstinline{fprintf(stderr, ...)} by the colorful \lstinline{INFO()}, \lstinline{WARNING()}, {\em etc.} macros in \lstinline{common/logging.h};
+    \end{itemize}
+  \item Guarded access to pointers: \lstinline{if (foo) foo->bar = 0;}
+  \item Block metadata: adding allocator pointer {\em before} returned address (more below).
+  \end{itemize}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Example (load file contents into memory)}
+
+  \begin{lstlisting}
+    rval_t file_contents(char *filename, size_t *size) {
+      FILE       *fp;
+      char    *bytes;
+      struct stat sb;
+      assert(filename && "Missing filename" );
+      if (-1==stat(filename, &sb)) return ERR(errno);
+      if (!(fp = fopen(filename, "rt"))) return ERR(errno);
+      bytes = block(sb.st_size);
+      for ( size_t r = 0, rr = 0 ; r < sb.st_size ; r += rr ) {
+        rr = fread(bytes+r, sb.st_size-r, 1, fp);
+        if (ferror(fp)) { del(&bytes); fclose(fp);
+          return ERR(ENODATA);
+        }
+      }
+      fclose(fp); if (size) *size = sb.st_size;
+      return OK(bytes);
+    }
+  \end{lstlisting}
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Example (using it)}
+
+  \begin{lstlisting}
+    int main(int argc, char *argv[]) {
+      size_t   length;
+      char  *filename = argc>1 ? argv[1] : NULL;
+      rval_t contents = file_contents( filename, &length );
+
+      if (IS_ERR(contents)) {
+        fprintf(stderr, "%s: FAILED (error %d).\n", filename, RCODE(contents));
+        exit(RCODE(contents));
+      }
+      
+      printf("%s: loaded %zu bytes.\n", filename, length);
+      del(&RVAL(contents));
+      
+      exit(EXIT_SUCCESS);
+    }
+  \end{lstlisting}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Example (running it)}
+
+  With full debug trace on error, watch error code propagate to the terminal:
+
+\begin{verbatim}
+$ make test/0-core@check
+./test/0-core -v
+[   file_contents:16]  return ERROR(2) 
+-v: FAILED (error 2).
+make: *** [.Makefile.inc:233: test/0-core@check] Error 2
+$ echo $?
+2
+\end{verbatim}
+
+  Same on success:
+
+\begin{verbatim}
+$ ./test/0-core ./test/0-core.c
+[   file_contents:21]  alloc 491 bytes at 0x515000000308
+[   file_contents:33]  return 
+./test/0-core.c: loaded 491 bytes.
+[            main:19]  dealloc at 0x515000000308
+\end{verbatim}
+  
+\end{frame}
+
+

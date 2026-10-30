@@ -1,0 +1,208 @@
+% ======================================================================
+\section{Hashing (for data indexing)}
+
+% ======================================================================
+\subsection{A subjective history of {\em ``Where did I put the damn keys?''}}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Searching, by hand}
+
+  Earliest alternative to linear search: hand-built index
+  \begin{itemize}
+  \item Mesopotamia
+
+    Clay tablets organized in collections, lexical catalogues constructed {\em systematically}.
+
+  \item Ancien Egypt
+
+    Administrative records by category, scribes produce {\em ordered} word (and sign) lists.
+
+    \begin{itemize}
+    \item Most often: single-level indexing
+    \end{itemize}
+
+  \item Greco-Roman world: most notable example is the Library of Alexandria
+    \begin{itemize}
+    \item Callimachus' {\em Pinakes}: huge catalogue by author {\em and} subject, with biblio info
+    \item Likely the first known database
+    \item ``Practical'' multi-level indexing
+    \end{itemize}
+  \item Romans credited to leverage alphabetical order for organization and search
+    \begin{itemize}
+    \item ``Abstract'' multi-level indexing
+    \end{itemize}
+  \item Pre-Google Internet had collaborative construction of curated website collections
+    \begin{itemize}
+    \item Still used on the Darknet today (darksites not discoverable by construction)
+    \end{itemize}
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Searching, with a machine}
+
+  Main problems with an index: built by hand, logarithmic up to index depth.  
+
+  You may still have a long list of data to check once you reached an index leaf.
+
+  \begin{itemize}
+  \item Mid-1940's: {\em Associative access} (making the goal explicit)
+
+    K. Zuse (Germany), V. Bush (USA).
+    
+    {\em ``What if those strange machines allowed to {\em search data by its very contents}?''}
+
+    \begin{itemize}
+    \item Goal: automatic (non-human) scribes.
+    \end{itemize}
+  \item 1953: {\em Chaining hashtables} (closed addressing)
+
+    H.P. Luhn.
+
+    {\em ``Let's {\em compute from the data itself} the number of the list where it belongs!''}
+
+    \begin{itemize}
+    \item On an IBM 701: 2000 words of magnetic-drum memory, 72-bit machine words;
+    \item Full pointers too costly: have smaller indices into storage array instead;
+    \item That's basically our pointer arithmetics (to save on the pointers size.)
+    \end{itemize}
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Searching, with a machine of today}
+
+  \begin{itemize}
+  \item 1954: {\em Linear hashtables} (open addressing)
+
+    G. Amdahl, E. McGraw, A. Samuel (IBM 701) + A. Ershov independently.
+
+    {\em ``By the way, you could even have {\em implicit} lists!''}
+
+  \item Late 1960's: The word ``hashing'' eventually becomes standard terminology
+    \begin{itemize}
+    \item Many variants explored: quadratic hashing, double-hashing, Cuckoo hashing, {\em etc.}
+    \end{itemize}
+
+  \item 1986: {\em Robin-Hood hashing} (minimize inequalities to maximize robustness)
+
+    P. Celis.
+    
+    {\em ``Let's have a linear table {\em self-organize to maintain highest performance}!''}
+
+    \begin{itemize}
+    \item Robustness? {\em RH maintains highest performance under a larger panel of workloads.}
+    \end{itemize}
+    
+  \item 2022: {\em SwissTable} (leverage insn-level, parallel probing)
+
+    Abseil (company).
+    
+    {\em ``Let's have {\em ultra-fast SIMD lookups with metadata} control bytes!''}
+
+    \begin{itemize}
+    \item Robin-Hood on steroids (most lookups with a single probing insn)
+    \item Influential design (Rust's HashBrown table, {\em etc.})
+    \end{itemize}
+  \end{itemize}
+  
+\end{frame}
+
+
+% ======================================================================
+\subsection{A world of complexity}
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{The big picture (searching)}
+
+  Applications fall in two categories:
+  \begin{enumerate}
+  \item If you are only concerned with {\em exact search}, go with hashtables
+
+    {\em ``What is the value of this key?''}
+
+    Hashtables are unbeatable at this game (amortized constant-time)
+    
+  \item If you need {\em interval search}, go with ordered search trees
+
+    {\em ``What are the keys in this interval?''} (spatial data, ecological data, {\em etc.})
+
+    \begin{itemize}
+    \item {\em Lower-bound} search primitive.
+    \item The lower bound in the data may or may not be that of the search interval
+    \item Easy to search for absence or presence+value of one specific key
+
+      To instantiate exact search for comparison purposes.
+    \end{itemize}
+  \end{enumerate}
+
+  That's a lot of ground to cover!
+  
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{The big picture (hashing)}
+
+  We are {\em not} doing crypto!
+  \begin{itemize}
+  \item Hash data to produce secure digests (Keccak, {\em etc.})
+  \item Much more stringent mathematical requirements
+
+    Collision resistance, pre-image resistance, second pre-image resistance.
+  \end{itemize}
+
+  But we may still have adversaries:
+  \begin{itemize}
+  \item DoS (Denial-of-Service) attack on routers
+
+  \item Targeted weakness was the router internal hashtable
+
+  \item Hackers triggering catastrophic, degenerate linear-time search
+
+    Poorly designed hash function allowed crafting the right attack sequence
+
+  \item SipHash hash function specifically designed as a counter-measure
+  \end{itemize}
+
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{The big picture (hashing + searching)}
+
+  \begin{itemize}
+  \item A hash is a source of pseudo-randomness derived from the key alone.
+  \end{itemize}
+
+  Search trees may use a hash in essentially two forms:
+
+  \begin{enumerate}
+  \item Cheap and efficient randomized balancing of a BST (treap)
+
+    More complicated and stringent balancing with AVL trees, Red-Black trees.
+  \item Plain routing info inside the tree (hashtrie)
+
+    Balancing unordered keys.
+  \end{enumerate}
+
+  It is common practice for a hash-based search structure to {\em finalize} the hash.
+
+  The user must provide the hash function, which may be poorly designed:
+  \begin{itemize}
+  \item Add some internal layer of ``hashing the hash''
+  \item Must be fast (a few CPU insns): \textsc{xor}-based bit-mixer, Fibonacci hashing
+  \end{itemize}
+
+  Cheap patch against entry-level contingencies, close to useless under attack.
+  \begin{itemize}
+  \item Gain operational reach and stability.
+  \end{itemize}
+  
+\end{frame}
+
+

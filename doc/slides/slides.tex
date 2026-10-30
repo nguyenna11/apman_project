@@ -1,0 +1,143 @@
+\documentclass[aspectratio=169,11pt]{beamer}
+
+% ----------------------------------------------------------------------
+% Theme
+% ----------------------------------------------------------------------
+
+\usetheme{default}
+\usecolortheme{default}
+
+% Remove navigation symbols
+\setbeamertemplate{navigation symbols}{}
+
+% ----------------------------------------------------------------------
+% Packages
+% ----------------------------------------------------------------------
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+
+\usepackage{amsmath,amssymb,amsthm,amsfonts}
+\usepackage{bbm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\usepackage{listings}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  urlcolor=structure.fg,
+  linkcolor=structure.fg,
+  citecolor=structure.fg
+}
+
+\lstset{
+  language=C,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!60!black},
+  stringstyle=\color{red},
+  numbers=left,
+  numberstyle=\tiny,
+  frame=single,
+  breaklines=true
+}
+
+% ----------------------------------------------------------------------
+% Metadata
+% ----------------------------------------------------------------------
+
+\title{{APMAN}}
+\author{Fran\c cois Cayre, Auguste Olivry}
+\institute{Phelma / 2A {SEOC}}
+\date{2026--2027}
+
+% ----------------------------------------------------------------------
+% Footer
+% ----------------------------------------------------------------------
+
+\setbeamertemplate{footline}{
+    \leavevmode
+    \hbox{
+        \begin{beamercolorbox}[wd=.30\paperwidth,ht=2.5ex,dp=1ex,leftskip=1em]{author in head/foot}
+            \insertshortauthor
+        \end{beamercolorbox}
+
+        \begin{beamercolorbox}[wd=.50\paperwidth,ht=2.5ex,dp=1ex,center]{title in head/foot}
+            \insertshorttitle
+        \end{beamercolorbox}
+
+        \begin{beamercolorbox}[wd=.20\paperwidth,ht=2.5ex,dp=1ex,rightskip=1em]{date in head/foot}
+            \insertframenumber{} / \inserttotalframenumber
+        \end{beamercolorbox}
+    }
+}
+
+% No headline
+\setbeamertemplate{headline}{}
+
+% ----------------------------------------------------------------------
+% Outline at beginning of each section
+% ----------------------------------------------------------------------
+
+\AtBeginSubsection[]
+{
+  \begin{frame}<beamer>{Outline}
+    \tableofcontents[
+      currentsubsection, 
+      hideothersubsections, 
+      subsectionstyle=show/shaded/hide
+    ]
+  \end{frame}
+}
+
+% ----------------------------------------------------------------------
+% Document
+% ----------------------------------------------------------------------
+
+\begin{document}
+
+% ----------------------------------------------------------------------
+\begin{frame}
+    \titlepage
+\end{frame}
+
+
+% ----------------------------------------------------------------------
+\begin{frame}[fragile]{Course objectives}
+
+  \begin{enumerate}
+  \item To tackle real-world issues in programming, testing and benchmarking
+  \item To learn (quite) a few techniques in C
+
+    Modules, genericity, iterators, meta-programming, generalization/specialization
+  \item To understand how a streamlined methodology brings {\em guarantees} to your code
+  \item To master complexity issues---in (applied) Computer Science {\em and} with experiments
+  \item To understand (and close!) the gap between the textbook and robust, fast code
+  \end{enumerate}
+
+  You are given an environment that implements much of what these slides discuss:
+  \begin{itemize}
+  \item It's only good news on a higher level: that's a lot of real, {\em hardcore} C to digest.
+  \item These slides describe the techniques we used as independently as possible.
+
+    Sections ``Setting the stage'' and ``Basic tools for data structures.''
+  \item Ask yourself/us how to make the most out of it! With the least effort!
+  \end{itemize}
+  
+\end{frame}
+
+
+\input{part/hashing.tex}
+
+\input{part/intro.tex}
+\input{part/ds.tex}
+
+\input{part/testing.tex}
+
+\input{part/todo.tex}
+
+% ----------------------------------------------------------------------
+\end{document}
